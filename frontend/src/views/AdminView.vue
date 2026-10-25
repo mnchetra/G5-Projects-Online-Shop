@@ -6,6 +6,7 @@ import { Boxes, ClipboardList, UsersRound, Plus, X, Trash2, Pencil, Tags, Shield
 import AdminOrdersTable from '../components/AdminOrdersTable.vue';
 import AdminSecurityCenter, { type AdminSecuritySection } from '../components/AdminSecurityCenter.vue';
 import AdminCommerceWorkspace, { type CommerceWorkspaceSection } from '../components/AdminCommerceWorkspace.vue';
+import AdminEscrowDesk from '../components/AdminEscrowDesk.vue';
 import { api, apiErrorMessage } from '../services/api';
 import type { Product } from '../data/products';
 
@@ -36,6 +37,7 @@ const commerceSection = computed(() => tab.value as CommerceWorkspaceSection);
 const securitySection = computed<AdminSecuritySection>(() => tab.value === 'users-roles' ? 'users' : tab.value === 'audit' ? 'audit' : 'overview');
 const tabs = computed(() => [
   { id: 'dashboard', label: locale.value === 'km' ? 'ផ្ទាំងគ្រប់គ្រង' : 'Dashboard', icon: LayoutDashboard },
+  { id: 'escrow', label: locale.value === 'km' ? 'ធានាប្រាក់ Escrow' : 'Bakong Escrow Desk', icon: ShieldCheck },
   { id: 'orders', label: t('admin.orders'), icon: ClipboardList },
   { id: 'products', label: t('admin.products'), icon: Boxes },
   { id: 'categories', label: t('admin.categories'), icon: Tags },
@@ -222,6 +224,8 @@ const date = (value: string) => new Intl.DateTimeFormat(locale.value === 'km' ? 
       <template v-else-if="tab === 'audit'"><AdminSecurityCenter initial-section="audit" :light-mode="isLight" @toggle-light="isLight = !isLight" /></template>
 
       <template v-else-if="tab === 'dashboard'"><AdminCommerceWorkspace section="dashboard" :locale="locale" :light-mode="isLight" :stats="stats" :products="products" :orders="orders" :customers="customers" @navigate="tab = $event" /></template>
+
+      <template v-else-if="tab === 'escrow'"><AdminEscrowDesk :locale="locale" :light-mode="isLight" /></template>
 
       <template v-else-if="tab === 'products'">
         <div class="admin-actions-row"><p>{{ products.length }} {{ t('admin.products').toLowerCase() }}</p><button class="button button-dark" type="button" @click="openProductForm()"><Plus :size="16" />{{ t('admin.addProduct') }}</button></div>

@@ -12,7 +12,7 @@ export async function listProducts(query: Record<string, unknown>) {
   const where: Prisma.ProductWhereInput = {
     isActive: true,
     ...(category ? { category: { slug: category } } : {}),
-    ...(search ? { OR: [{ nameEn: { contains: search, mode: 'insensitive' } }, { nameKm: { contains: search } }, { descriptionEn: { contains: search, mode: 'insensitive' } }] } : {}),
+    ...(search ? { OR: [{ nameEn: { contains: search } }, { nameKm: { contains: search } }, { descriptionEn: { contains: search } }] } : {}),
     ...(Number.isFinite(minPrice) || Number.isFinite(maxPrice) ? { price: { ...(Number.isFinite(minPrice) ? { gte: minPrice } : {}), ...(Number.isFinite(maxPrice) ? { lte: maxPrice } : {}) } } : {})
   };
   const [items, total] = await Promise.all([

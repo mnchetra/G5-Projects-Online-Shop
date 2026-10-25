@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { addProductImage, adminCustomers, adminOrders, createCategory, createProduct, dashboard, deleteCategory, deleteProduct, removeProductImage, updateCategory, updateProduct } from '../controllers/admin.controller.js';
+import { handleAdminDispatchEscrow, handleAdminListEscrows, handleAdminResolveDispute } from '../controllers/escrow.controller.js';
 import { updateOrderStatus } from '../controllers/order.controller.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import { uploadProductImage } from '../middleware/imageUpload.js';
 import { validateBody } from '../middleware/validate.js';
 import { asyncHandler } from '../utils/http.js';
-import { orderStatusSchema, productSchema } from '../validators/schemas.js';
+import { escrowResolveSchema, orderStatusSchema, productSchema } from '../validators/schemas.js';
 
 const categorySchema = z.object({ slug: z.string().trim().min(2).regex(/^[a-z0-9-]+$/), nameEn: z.string().trim().min(2), nameKm: z.string().trim().min(2), descriptionEn: z.string().optional(), descriptionKm: z.string().optional(), imageUrl: z.string().url().optional(), sortOrder: z.number().int().optional() });
 const router = Router();
@@ -14,6 +15,9 @@ router.use(requireAuth, requireAdmin);
 router.get('/dashboard', asyncHandler(dashboard));
 router.get('/orders', asyncHandler(adminOrders));
 router.patch('/orders/:id/status', validateBody(orderStatusSchema), asyncHandler(updateOrderStatus));
+router.get('/escrows', asyncHandler(handleAdminListEscrows));
+router.post('/escrows/:orderNumber/dispatch', asyncHandler(handleAdminDispatchEscrow));
+router.post('/escrows/:orderNumber/resolve', validateBody(escrowResolveSchema), asyncHandler(handleAdminResolveDispute));
 router.get('/customers', asyncHandler(adminCustomers));
 router.post('/products', validateBody(productSchema), asyncHandler(createProduct));
 router.put('/products/:id', validateBody(productSchema), asyncHandler(updateProduct));

@@ -60,9 +60,28 @@ async function main() {
 	const email = process.env.SEED_ADMIN_EMAIL;
 	const password = process.env.SEED_ADMIN_PASSWORD;
 	if (email && password) {
-		await prisma.user.upsert({ where: { email }, update: {}, create: { name: 'Store administrator', email, role: 'ADMIN', passwordHash: await bcrypt.hash(password, 12) } });
+		await prisma.user.upsert({
+			where: { email },
+			update: { passwordHash: await bcrypt.hash(password, 12) },
+			create: { name: 'Store administrator', email, role: 'ADMIN', passwordHash: await bcrypt.hash(password, 12) }
+		});
 	}
-	console.info(`Seeded ${categories.length} categories and ${products.length} products.`);
+
+	const customerEmail = process.env.SEED_CUSTOMER_EMAIL || 'customer@example.com';
+	const customerPassword = process.env.SEED_CUSTOMER_PASSWORD || 'Customer12345!';
+	await prisma.user.upsert({
+		where: { email: customerEmail },
+		update: { passwordHash: await bcrypt.hash(customerPassword, 12) },
+		create: {
+			name: 'Sophea Customer',
+			email: customerEmail,
+			phone: '012345678',
+			role: 'CUSTOMER',
+			passwordHash: await bcrypt.hash(customerPassword, 12)
+		}
+	});
+
+	console.info(`Seeded ${categories.length} categories, ${products.length} products, admin, and ready-to-use customer (${customerEmail}).`);
 }
 
 main().finally(() => prisma.$disconnect());

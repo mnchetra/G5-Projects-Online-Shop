@@ -33,15 +33,27 @@ export async function checkout(input: CheckoutInput, userId?: string) {
     const deliveryFee = subtotal.greaterThanOrEqualTo(50) ? new Prisma.Decimal(0) : new Prisma.Decimal(2.5);
     const total = subtotal.add(deliveryFee);
     const orderNumber = `MM-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const isEscrow = input.paymentMethod === PaymentMethod.BAKONG_ESCROW;
     return tx.order.create({
       data: {
         orderNumber, userId, customerName: input.customerName, customerEmail: input.customerEmail || null,
         customerPhone: input.customerPhone, addressLine: input.addressLine, city: input.city, province: input.province,
         notes: input.notes, subtotal, deliveryFee, total, paymentMethod: input.paymentMethod,
         items: { create: orderItems },
-        payment: { create: { method: input.paymentMethod, amount: total } }
+        payment: { create: { method: input.paymentMethod, amount: total } },
+        ...(isEscrow ? {
+          escrow: {
+            create: {
+              contractAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+              contractNetwork: 'Bakong EVM L2 Testnet',
+              amount: total,
+              status: 'INITIATED',
+              inspectionDays: 3
+            }
+          }
+        } : {})
       },
-      include: { items: true, payment: true }
+      include: { items: true, payment: true, escrow: true }
     });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

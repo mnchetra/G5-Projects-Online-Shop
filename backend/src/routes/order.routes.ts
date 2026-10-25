@@ -6,7 +6,7 @@ import { validateBody } from '../middleware/validate.js';
 import { checkoutSchema } from '../validators/schemas.js';
 
 const router = Router();
-router.post('/', optionalAuth, validateBody(checkoutSchema), asyncHandler(createOrder));
+router.post('/', requireAuth, validateBody(checkoutSchema), asyncHandler(createOrder));
 router.get('/', requireAuth, asyncHandler(listOrders));
 router.get('/:orderNumber', requireAuth, asyncHandler(getOrder));
 export default router;

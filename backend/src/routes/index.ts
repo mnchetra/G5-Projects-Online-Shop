@@ -5,6 +5,7 @@ import cartRoutes from './cart.routes.js';
 import catalogRoutes from './catalog.routes.js';
 import orderRoutes from './order.routes.js';
 import paymentRoutes from './payment.routes.js';
+import escrowRoutes from './escrow.routes.js';
 import userRoutes from './user.routes.js';
 
 const router = Router();
@@ -13,6 +14,7 @@ router.use('/', catalogRoutes);
 router.use('/cart', cartRoutes);
 router.use('/orders', orderRoutes);
 router.use('/payments', paymentRoutes);
+router.use('/escrow', escrowRoutes);
 router.use('/users', userRoutes);
 router.use('/admin', adminRoutes);
 export default router;

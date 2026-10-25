@@ -28,10 +28,10 @@ describe('API', () => {
     expect(response.body.error.message).toBe('Authentication required');
   });
 
-  it('validates guest checkout input before opening a transaction', async () => {
+  it('requires authentication before checkout', async () => {
     const response = await request(app).post('/api/orders').send({});
-    expect(response.status).toBe(400);
-    expect(response.body.error.message).toBe('Invalid request data');
+    expect(response.status).toBe(401);
+    expect(response.body.error.message).toBe('Authentication required');
   });
 
   it('supports ABA KHQR checkout while keeping COD as the backward-compatible default', () => {

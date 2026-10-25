@@ -4,13 +4,16 @@ import { prisma } from '../lib/prisma.js';
 import { checkout } from '../services/order.service.js';
 import { HttpError, success } from '../utils/http.js';
 import { assertBakongConfigured, checkBakongKhqr, createBakongKhqr } from '../services/payment.service.js';
+import { lockEscrowFunds } from '../services/escrow.service.js';
 
-type KhqrOrder = Pick<Awaited<ReturnType<typeof checkout>>, 'id' | 'orderNumber' | 'total' | 'paymentMethod' | 'payment'>;
+type KhqrOrder = Pick<Awaited<ReturnType<typeof checkout>>, 'id' | 'orderNumber' | 'total' | 'paymentMethod' | 'payment' | 'escrow'>;
 
 export async function createOrder(req: Request, res: Response) {
-  if (req.body.paymentMethod === 'ABA_KHQR') assertBakongConfigured();
+  if (req.body.paymentMethod === 'ABA_KHQR' || req.body.paymentMethod === 'BAKONG_ESCROW') {
+    assertBakongConfigured();
+  }
   const order = await checkout(req.body, req.auth?.userId);
-  if (order.paymentMethod !== 'ABA_KHQR') {
+  if (order.paymentMethod === 'CASH_ON_DELIVERY') {
     res.status(201).json(success({ order, khqr: null }));
     return;
   }
@@ -25,9 +28,14 @@ export async function createOrder(req: Request, res: Response) {
 }
 
 async function findGuestKhqrOrder(orderNumber: string, customerPhone: string): Promise<KhqrOrder> {
-  const order = await prisma.order.findFirst({ where: { orderNumber, customerPhone }, include: { payment: true } });
+  const order = await prisma.order.findFirst({
+    where: { orderNumber, customerPhone },
+    include: { payment: true, escrow: true }
+  });
   if (!order) throw new HttpError(404, 'Order not found');
-  if (order.paymentMethod !== 'ABA_KHQR' || !order.payment) throw new HttpError(409, 'This order does not use ABA KHQR');
+  if (order.paymentMethod === 'CASH_ON_DELIVERY' || !order.payment) {
+    throw new HttpError(409, 'This order does not use Bakong KHQR');
+  }
   return order;
 }
 
@@ -55,30 +63,46 @@ export async function checkOrderKhqrStatus(req: Request, res: Response) {
   const order = await findGuestKhqrOrder(req.params.orderNumber, req.body.customerPhone);
   if (!order.payment) throw new HttpError(404, 'Payment record not found');
   if (order.payment.status === 'PAID') {
-    res.json(success({ status: 'PAID', confirmed: true }));
+    res.json(success({ status: 'PAID', confirmed: true, escrow: order.escrow }));
     return;
   }
   if (!order.payment.providerRef) {
-    res.json(success({ status: 'PENDING', confirmed: false }));
+    res.json(success({ status: 'PENDING', confirmed: false, escrow: order.escrow }));
     return;
   }
 
   const result = await checkBakongKhqr(order.payment.providerRef);
   if (result.paid) {
     await prisma.payment.update({ where: { id: order.payment.id }, data: { status: 'PAID' } });
-    res.json(success({ status: 'PAID', confirmed: true }));
+
+    let updatedEscrow = order.escrow;
+    if (order.paymentMethod === 'BAKONG_ESCROW') {
+      updatedEscrow = await lockEscrowFunds({
+        orderNumber: order.orderNumber,
+        bakongMd5: order.payment.providerRef
+      });
+    }
+
+    res.json(success({ status: 'PAID', confirmed: true, escrow: updatedEscrow }));
     return;
   }
-  res.json(success({ status: 'PENDING', confirmed: false }));
+  res.json(success({ status: 'PENDING', confirmed: false, escrow: order.escrow }));
 }
 
 export async function listOrders(req: Request, res: Response) {
-  const orders = await prisma.order.findMany({ where: { userId: req.auth!.userId }, include: { items: true, payment: true }, orderBy: { createdAt: 'desc' } });
+  const orders = await prisma.order.findMany({
+    where: { userId: req.auth!.userId },
+    include: { items: true, payment: true, escrow: true },
+    orderBy: { createdAt: 'desc' }
+  });
   res.json(success(orders));
 }
 
 export async function getOrder(req: Request, res: Response) {
-  const order = await prisma.order.findFirst({ where: { orderNumber: req.params.orderNumber, userId: req.auth!.userId }, include: { items: true, payment: true } });
+  const order = await prisma.order.findFirst({
+    where: { orderNumber: req.params.orderNumber, userId: req.auth!.userId },
+    include: { items: true, payment: true, escrow: true }
+  });
   if (!order) throw new HttpError(404, 'Order not found');
   res.json(success(order));
 }
@@ -97,7 +121,7 @@ export async function updateOrderStatus(req: Request, res: Response) {
       }
       await tx.payment.updateMany({ where: { orderId: current.id, status: 'PENDING' }, data: { status: 'FAILED' } });
     }
-    return tx.order.update({ where: { id: current.id }, data: { status }, include: { items: true, payment: true } });
+    return tx.order.update({ where: { id: current.id }, data: { status }, include: { items: true, payment: true, escrow: true } });
   });
   res.json(success(order));
 }

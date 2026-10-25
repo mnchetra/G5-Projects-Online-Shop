@@ -1,1 +1,0 @@
-ALTER TYPE "PaymentMethod" ADD VALUE 'ABA_KHQR';

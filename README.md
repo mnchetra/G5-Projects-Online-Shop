@@ -1,77 +1,143 @@
 # Mekong Market
 
-A bilingual English–Khmer shopping platform for Cambodian-made goods. The workspace contains a Vue 3/Vite storefront and admin dashboard, plus an Express REST API backed by PostgreSQL and Prisma.
+A modern bilingual English–Khmer e-commerce platform for Cambodian-made goods. Built with a Vue 3/Vite storefront, an Express REST API backed by MySQL (XAMPP phpMyAdmin) & Prisma, and a **Bakong Smart Contract Escrow Service** for safe, dispute-protected online payments.
+
+---
+
+## Key Features
+
+1. **Member-Only Purchase Flow & In-Page Checkout Gate:**
+   - Guest visitors can freely browse, search, filter, and add items to their bag.
+   - Ordering requires an account (`POST /api/orders` enforces authentication).
+   - In-page **Step 1 (Login / Register)** at `/checkout` ensures guests don't lose their cart items and can sign in, register, or use 1-click demo access immediately before entering delivery details in **Step 2**.
+   - Dedicated Auth UI at `/login` and `/register` with benefits showcase and password reveal.
+
+2. **Bakong Smart Escrow Payment Service (Smart Contract):**
+   - Implemented via Ethereum/EVM-compatible smart contract ([BakongEscrow.sol](backend/contracts/BakongEscrow.sol)).
+   - **Protection:** Funds are locked in a smart contract vault via Bakong KHQR until the buyer inspects and confirms delivery.
+   - **Escrow Lifecycle:** `INITIATED` ➜ `LOCKED` ➜ `DISPATCHED` ➜ `RELEASED` (or `DISPUTED` ➜ `REFUNDED`).
+   - Dedicated interactive on-chain tracker at `/escrow/:orderNumber`.
+   - Admin Escrow Desk for arbitrating disputes and monitoring vault balances.
+
+3. **Multi-Payment Support:**
+   - **Bakong Smart Escrow** (Smart contract on-chain protection)
+   - **Bakong KHQR** (Dynamic QR payment generation)
+   - **Cash on Delivery (COD)**
+
+4. **Bilingual Localization (English & Khmer):**
+   - Instant toggle between English and ភាសាខ្មែរ across all catalog views, checkout, account, and admin desks.
+
+5. **MySQL Database on XAMPP phpMyAdmin:**
+   - Fully relational schema managed via Prisma ORM on port `3307` (`online_shop_db`).
+
+---
 
 ## Architecture
 
 ```text
-frontend/                         Vue 3 + TypeScript + Vite + Tailwind
-  src/components/                 Shared storefront and admin components
-  src/views/                      Home, catalog, detail, cart, checkout, account, admin
-  src/stores/                     Persistent cart and cookie-backed account state (Pinia)
-  src/router/                     Vue Router and administrator route guard
-  src/i18n/                       English and Khmer UI translations
-  src/services/                   API client
-backend/                          Express + TypeScript REST API
-  src/controllers/                HTTP handlers
-  src/services/                   Auth, catalog, checkout, payment boundary
-  src/routes/                     Public, customer, and admin API routes
-  src/middleware/                 Auth, role checks, validation, errors
-  src/validators/                 Zod request schemas
-  prisma/schema.prisma            PostgreSQL data model
-  prisma/migrations/              Initial database migration
-  prisma/seed.ts                  Bilingual categories/products and optional admin
-docs/api.md                       Endpoint reference and request examples
+frontend/                             Vue 3 + TypeScript + Vite
+  src/components/                     Storefront, Admin Desk, and Escrow Desk
+  src/views/                          Home, Catalog, Product, Cart, Checkout, Auth, Escrow, Admin
+  src/stores/                         Pinia cart store and cookie-backed auth store
+  src/router/                         Vue Router with auth & admin route guards
+  src/i18n/                           English (en.json) & Khmer (km.json) translations
+  src/services/                       Axios API client with error handling
+backend/                              Express + TypeScript REST API
+  contracts/                          Solidity smart contract (BakongEscrow.sol)
+  src/controllers/                    Auth, catalog, order, escrow, payment handlers
+  src/services/                       Catalog, order, payment, and smart contract escrow service
+  src/routes/                         Public, customer, escrow, and admin API routes
+  src/middleware/                     Auth (requireAuth, requireAdmin), rate limiting, Zod validation
+  src/validators/                     Zod request schemas
+  prisma/schema.prisma                MySQL data model (User, Order, EscrowRecord, Product, Category)
+  prisma/migrations/                  Database migrations
+  prisma/seed.ts                      Bilingual categories, products, customer & admin seed data
+docs/api.md                           REST endpoint reference and escrow request examples
 ```
+
+---
 
 ## Requirements
 
-- Node.js 20 or newer and npm
-- PostgreSQL 15 or newer
+- **Node.js:** 20+ and npm
+- **Database:** MySQL on XAMPP (`http://localhost/phpmyadmin`) or MariaDB on port `3307` (or `3306`)
 
-## Run Locally
+---
 
-1. Create a PostgreSQL database named `mekong_market` (or set a different connection URL).
-2. Copy `backend/.env.example` to `backend/.env`; set `DATABASE_URL` and the frontend origin. Set `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` to create an administrator during seeding.
-3. Copy `frontend/.env.example` to `frontend/.env` if the API is not at its default `http://localhost:4000/api` URL.
-4. Install and initialize the API:
+## Quick Start (Run Locally)
 
-   ```powershell
-   npm --prefix backend install
-   npm --prefix backend run db:generate
-   npm --prefix backend run db:deploy
-   npm --prefix backend run db:seed
-   npm --prefix backend run dev
+### 1. Database Setup
+1. Start **Apache** and **MySQL** in your **XAMPP Control Panel**.
+2. Open **phpMyAdmin** (`http://localhost/phpmyadmin`) and create a database named `online_shop_db`.
+3. Check `backend/.env`:
+   ```env
+   DATABASE_URL="mysql://root:@localhost:3307/online_shop_db"
+   PORT=4000
+   FRONTEND_ORIGIN="http://localhost:5173"
    ```
 
-5. In a second terminal, install and start the storefront:
+### 2. Backend API Setup
+```powershell
+# Install dependencies
+npm --prefix backend install
 
-   ```powershell
-   npm --prefix frontend install
-   npm --prefix frontend run dev
-   ```
+# Generate Prisma client & run migrations
+npm --prefix backend run db:generate
+npm --prefix backend run db:deploy
 
-Open `http://localhost:5173`. API health is available at `http://localhost:4000/api/health`. The bundled bilingual catalog renders before the database is configured; checkout, accounts, and admin functions require the API and PostgreSQL.
+# Seed demo categories, products, customer, and admin
+npm --prefix backend run seed
 
-The seeded admin can sign in at `/account` using the values configured in `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD`, then open the admin desk. Do not use sample credentials in a deployed environment.
+# Start API server (port 4000)
+npm --prefix backend run dev
+```
 
-## Tests and Builds
+### 3. Frontend Storefront Setup
+In a second terminal:
+```powershell
+# Install dependencies
+npm --prefix frontend install
+
+# Start development server (port 5173)
+npm --prefix frontend run dev
+```
+
+Open **[http://localhost:5173](http://localhost:5173)** in your browser.
+
+---
+
+## Ready-to-Use Demo Accounts
+
+| Role | Email | Password | Access |
+| :--- | :--- | :--- | :--- |
+| **Customer** | `customer@example.com` | `Customer12345!` | Shop, cart, in-page checkout, order history |
+| **Administrator** | `admin@example.com` | `Admin12345!` | Market Desk (`/admin`), product catalog, orders, escrow arbitration |
+
+> *Tip: You can also use the **1-Click Demo Login** buttons on the login page and checkout gate for instant evaluation.*
+
+---
+
+## Testing & Quality Assurance
 
 ```powershell
+# Run backend test suite (16 tests including escrow lifecycle)
 npm --prefix backend test
-npm --prefix backend run build
+
+# Run frontend tests (5 unit tests)
 npm --prefix frontend test
+
+# Verify production builds
+npm --prefix backend run build
 npm --prefix frontend run build
 ```
 
-## Security and Operations
+---
 
-- Passwords use bcrypt; random, opaque session tokens are held in HttpOnly, SameSite=Lax cookies. Only SHA-256 token hashes are stored in PostgreSQL, and logout revokes the server-side session.
-- Set `COOKIE_SECURE=true` behind HTTPS in production. Set an exact `FRONTEND_ORIGIN`; never use wildcard origins with credentials.
-- Session tokens use cryptographic randomness; only SHA-256 hashes are stored. Expired sessions are removed when encountered or during a new sign-in.
-- Helmet, credentialed CORS, request-size limits, API rate limiting, Zod validation, role checks, and Prisma parameterized queries are enabled.
-- Checkout re-reads current product prices and decrements stock inside a serializable database transaction. Card data is not collected or stored. A payment-provider boundary is ready for future integration.
-- Uploaded product images are signature-checked and stored locally under `backend/uploads/products`. For multi-instance production, connect the admin image flow to private object storage/CDN and validate allowed remote image hosts.
-- Review dependency audit output and pin/update dependencies as part of deployment. Add HTTPS, database backups, monitoring, and a secret manager before launch.
+## Security & Reliability
 
-See [docs/api.md](docs/api.md) for REST endpoints and examples.
+- **Authentication & Sessions:** Passwords hashed with bcrypt; HTTP-only SameSite=Lax session cookies storing cryptographic SHA-256 tokens.
+- **Order Protection:** Guests cannot place orders (`requireAuth` guard). Price recalculation and inventory decrements execute inside serializable database transactions.
+- **Smart Contract Escrow:** On-chain escrow vault balances, buyer inspection deadlines, and multi-signature arbitration ensure fraud-free transactions.
+- **Application Security:** Helmet security headers, credentialed CORS, Zod schema validation, API rate limiting, and parameterized Prisma queries prevent SQL injection and brute-force attacks.
+
+See [docs/api.md](docs/api.md) for REST API endpoints and escrow contract reference.

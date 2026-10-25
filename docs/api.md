@@ -36,6 +36,9 @@ Example checkout:
 | --- | --- | --- |
 | POST | `/payments/aba/:orderNumber/khqr` | Retry KHQR generation for a pending order; requires `{ "customerPhone": "..." }` |
 | POST | `/payments/aba/:orderNumber/status` | Check payment status; requires `{ "customerPhone": "..." }` |
+| GET | `/escrow/:orderNumber` | Public smart contract escrow status, addresses, and transaction hashes |
+| POST | `/escrow/:orderNumber/release` | Buyer confirms delivery & triggers smart contract release to seller |
+| POST | `/escrow/:orderNumber/dispute` | Buyer raises formal escrow dispute (`{ "reason": "...", "customerPhone": "..." }`) |
 
 ## Signed-In Customer
 
@@ -44,7 +47,7 @@ Example checkout:
 | GET | `/auth/me` | Current session |
 | GET / POST | `/cart` / `/cart/items` | Read cart / add item |
 | PATCH / DELETE | `/cart/items/:id` | Update quantity / remove item |
-| GET | `/orders` | Order history |
+| GET | `/orders` | Order history including escrow status |
 | GET | `/orders/:orderNumber` | Order tracking and items |
 | GET / POST | `/users/addresses` | List / save delivery addresses |
 | PATCH | `/users/profile` | Update name and phone |
@@ -60,6 +63,9 @@ All routes require an authenticated user whose role is `ADMIN`.
 | GET | `/admin/dashboard` | Sales totals, customers, products, recent orders |
 | GET | `/admin/orders` | Browse orders |
 | PATCH | `/admin/orders/:id/status` | Update status, e.g. `{ "status": "SHIPPED" }` |
+| GET | `/admin/escrows` | Browse and filter all smart contract escrow agreements and stats |
+| POST | `/admin/escrows/:orderNumber/dispatch` | Seller dispatches order and starts inspection countdown (`{ "inspectionDays": 3 }`) |
+| POST | `/admin/escrows/:orderNumber/resolve` | Arbitrate dispute (`{ "resolution": "RELEASE_TO_SELLER" | "REFUND_TO_BUYER", "notes": "..." }`) |
 | GET | `/admin/customers` | Browse customer accounts |
 | POST / PUT / DELETE | `/admin/products` and `/admin/products/:id` | Create, update, or archive products |
 | POST / PUT / DELETE | `/admin/categories` and `/admin/categories/:id` | Create, update, or delete an unused category |

@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-	provider = "postgresql"
+	provider = "mysql"
 	url      = env("DATABASE_URL")
 }
 
@@ -24,6 +24,16 @@ enum OrderStatus {
 enum PaymentMethod {
 	CASH_ON_DELIVERY
 	ABA_KHQR
+	BAKONG_ESCROW
+}
+
+enum EscrowStatus {
+	INITIATED
+	FUNDS_LOCKED
+	DISPATCHED
+	RELEASED
+	DISPUTED
+	REFUNDED
 }
 
 enum PaymentStatus {
@@ -85,9 +95,9 @@ model Category {
 	slug          String    @unique
 	nameEn        String
 	nameKm        String
-	descriptionEn String?
-	descriptionKm String?
-	imageUrl      String?
+	descriptionEn String?   @db.Text
+	descriptionKm String?   @db.Text
+	imageUrl      String?   @db.Text
 	sortOrder     Int       @default(0)
 	createdAt     DateTime  @default(now())
 	updatedAt     DateTime  @updatedAt
@@ -102,8 +112,8 @@ model Product {
 	sku            String         @unique
 	nameEn         String
 	nameKm         String
-	descriptionEn  String
-	descriptionKm  String
+	descriptionEn  String         @db.Text
+	descriptionKm  String         @db.Text
 	price          Decimal        @db.Decimal(12, 2)
 	compareAtPrice Decimal?       @db.Decimal(12, 2)
 	stock          Int            @default(0)
@@ -125,7 +135,7 @@ model Product {
 model ProductImage {
 	id        String   @id @default(cuid())
 	productId String
-	url       String
+	url       String   @db.Text
 	altEn     String?
 	altKm     String?
 	sortOrder Int      @default(0)
@@ -174,13 +184,14 @@ model Order {
 	total         Decimal       @db.Decimal(12, 2)
 	status        OrderStatus   @default(PENDING)
 	paymentMethod PaymentMethod @default(CASH_ON_DELIVERY)
-	notes         String?
+	notes         String?       @db.Text
 	createdAt     DateTime      @default(now())
 	updatedAt     DateTime      @updatedAt
 	user          User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
 	address       Address?      @relation(fields: [addressId], references: [id], onDelete: SetNull)
 	items         OrderItem[]
 	payment       Payment?
+	escrow        EscrowRecord?
 
 	@@index([userId, createdAt])
 	@@index([status, createdAt])
@@ -215,6 +226,35 @@ model Payment {
 	createdAt   DateTime      @default(now())
 	updatedAt   DateTime      @updatedAt
 	order       Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+	@@index([status, createdAt])
+}
+
+model EscrowRecord {
+	id              String       @id @default(cuid())
+	orderId         String       @unique
+	contractAddress String       @default("0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7")
+	contractNetwork String       @default("Bakong EVM L2 Testnet")
+	txHash          String?
+	releaseTxHash   String?
+	refundTxHash    String?
+	disputeReason   String?      @db.Text
+	buyerAddress    String       @default("0x71C836466AB123fe86518170b028445485B821A8")
+	sellerAddress   String       @default("0x34A7B8233eD0c40e11894a4D2aA21D124806a771")
+	arbiterAddress  String       @default("0x12E9f7c00e668D8Fa3e93B474a001a1f0a2c9431")
+	amount          Decimal      @db.Decimal(12, 2)
+	bakongMd5       String?
+	bakongAccountId String?
+	status          EscrowStatus @default(INITIATED)
+	inspectionDays  Int          @default(3)
+	autoReleaseAt   DateTime?
+	lockedAt        DateTime?
+	dispatchedAt    DateTime?
+	releasedAt      DateTime?
+	refundedAt      DateTime?
+	createdAt       DateTime     @default(now())
+	updatedAt       DateTime     @updatedAt
+	order           Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
 	@@index([status, createdAt])
 }

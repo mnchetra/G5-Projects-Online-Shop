@@ -11,6 +11,7 @@
 		"db:migrate": "prisma migrate dev",
 		"db:deploy": "prisma migrate deploy",
 		"db:seed": "tsx prisma/seed.ts",
+		"seed": "tsx prisma/seed.ts",
 		"test": "vitest run"
 	},
 	"overrides": {
@@ -18,6 +19,7 @@
 			"deepmerge-ts": "^8.0.0"
 		}
 	},
+	
 	"dependencies": {
 		"@prisma/client": "^6.7.0",
 		"bcryptjs": "^2.4.3",
