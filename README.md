@@ -1,6 +1,6 @@
 # Mekong Market
 
-A modern bilingual English–Khmer e-commerce platform for Cambodian-made goods. Built with a Vue 3/Vite storefront, an Express REST API backed by MySQL (XAMPP phpMyAdmin) & Prisma, and a **Bakong Smart Contract Escrow Service** for safe, dispute-protected online payments.
+A modern bilingual English–Khmer e-commerce platform for Cambodian-made goods. Built with a Vue 3/Vite storefront and an Express REST API backed by MySQL and Prisma. Escrow and the demo wallet are database simulations; they do not custody or transfer real funds.
 
 ---
 
@@ -12,16 +12,15 @@ A modern bilingual English–Khmer e-commerce platform for Cambodian-made goods.
    - In-page **Step 1 (Login / Register)** at `/checkout` ensures guests don't lose their cart items and can sign in, register, or use 1-click demo access immediately before entering delivery details in **Step 2**.
    - Dedicated Auth UI at `/login` and `/register` with benefits showcase and password reveal.
 
-2. **Bakong Smart Escrow Payment Service (Smart Contract):**
-   - Implemented via Ethereum/EVM-compatible smart contract ([BakongEscrow.sol](backend/contracts/BakongEscrow.sol)).
-   - **Protection:** Funds are locked in a smart contract vault via Bakong KHQR until the buyer inspects and confirms delivery.
-   - **Escrow Lifecycle:** `INITIATED` ➜ `LOCKED` ➜ `DISPATCHED` ➜ `RELEASED` (or `DISPUTED` ➜ `REFUNDED`).
-   - Dedicated interactive on-chain tracker at `/escrow/:orderNumber`.
-   - Admin Escrow Desk for arbitrating disputes and monitoring vault balances.
+2. **Database-Tracked Order Holds (Demo):**
+   - The app records payment, shipment, buyer confirmation, dispute, and refund statuses in MySQL.
+   - Buyer confirmation marks an order hold as released; it does not call or pay a smart contract.
+   - The status tracker at `/escrow/:orderNumber` is available only to the order owner and administrators.
+   - Admin Escrow Desk supports dispatch and dispute status management.
 
 3. **Multi-Payment Support:**
-   - **Bakong Smart Escrow** (Smart contract on-chain protection)
-   - **Bakong KHQR** (Dynamic QR payment generation)
+   - **Demo Wallet** (admin-adjustable credits and transaction history; no real money)
+   - **Bakong KHQR** (dynamic QR payment generation; this app does not custody funds)
    - **Cash on Delivery (COD)**
 
 4. **Bilingual Localization (English & Khmer):**
@@ -45,11 +44,11 @@ frontend/                             Vue 3 + TypeScript + Vite
 backend/                              Express + TypeScript REST API
   contracts/                          Solidity smart contract (BakongEscrow.sol)
   src/controllers/                    Auth, catalog, order, escrow, payment handlers
-  src/services/                       Catalog, order, payment, and smart contract escrow service
+  src/services/                       Catalog, order, payment, and database escrow status services
   src/routes/                         Public, customer, escrow, and admin API routes
   src/middleware/                     Auth (requireAuth, requireAdmin), rate limiting, Zod validation
   src/validators/                     Zod request schemas
-  prisma/schema.prisma                MySQL data model (User, Order, EscrowRecord, Product, Category)
+  prisma/schema.prisma                MySQL data model (including wallet balances and transaction history)
   prisma/migrations/                  Database migrations
   prisma/seed.ts                      Bilingual categories, products, customer & admin seed data
 docs/api.md                           REST endpoint reference and escrow request examples
@@ -60,7 +59,7 @@ docs/api.md                           REST endpoint reference and escrow request
 ## Requirements
 
 - **Node.js:** 20+ and npm
-- **Database:** MySQL on XAMPP (`http://localhost/phpmyadmin`) or MariaDB on port `3307` (or `3306`)
+- **Database:** MySQL on XAMPP (`http://localhost/phpmyadmin`) or MariaDB on port `3306`
 
 ---
 
@@ -71,7 +70,7 @@ docs/api.md                           REST endpoint reference and escrow request
 2. Open **phpMyAdmin** (`http://localhost/phpmyadmin`) and create a database named `online_shop_db`.
 3. Check `backend/.env`:
    ```env
-   DATABASE_URL="mysql://root:@localhost:3307/online_shop_db"
+   DATABASE_URL="mysql://root:@localhost:3306/online_shop_db"
    PORT=4000
    FRONTEND_ORIGIN="http://localhost:5173"
    ```
@@ -120,7 +119,7 @@ Open **[http://localhost:5173](http://localhost:5173)** in your browser.
 ## Testing & Quality Assurance
 
 ```powershell
-# Run backend test suite (16 tests including escrow lifecycle)
+# Run backend tests (the escrow lifecycle suite writes orders; use an isolated test database)
 npm --prefix backend test
 
 # Run frontend tests (5 unit tests)
@@ -137,7 +136,8 @@ npm --prefix frontend run build
 
 - **Authentication & Sessions:** Passwords hashed with bcrypt; HTTP-only SameSite=Lax session cookies storing cryptographic SHA-256 tokens.
 - **Order Protection:** Guests cannot place orders (`requireAuth` guard). Price recalculation and inventory decrements execute inside serializable database transactions.
-- **Smart Contract Escrow:** On-chain escrow vault balances, buyer inspection deadlines, and multi-signature arbitration ensure fraud-free transactions.
+- **Demo Wallet:** Admin credit/debit adjustments and checkout holds are recorded in an append-only transaction history. Balances are not cash, deposits, or withdrawable funds. Demo-wallet orders remain marked as held until the buyer confirms delivery; approved refunds restore the demo balance.
+- **Escrow Status:** Shipment, confirmation, and dispute state changes are database-only. The Solidity source is not deployed or called by the backend, so this is not real smart-contract protection or payout.
 - **Application Security:** Helmet security headers, credentialed CORS, Zod schema validation, API rate limiting, and parameterized Prisma queries prevent SQL injection and brute-force attacks.
 
-See [docs/api.md](docs/api.md) for REST API endpoints and escrow contract reference.
+See [docs/api.md](docs/api.md) for REST API endpoints and demo-wallet behavior.

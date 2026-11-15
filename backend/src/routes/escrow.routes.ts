@@ -3,11 +3,12 @@ import { getEscrowPublic, handleDisputeEscrow, handleReleaseEscrow } from '../co
 import { asyncHandler } from '../utils/http.js';
 import { validateBody } from '../middleware/validate.js';
 import { escrowActionSchema } from '../validators/schemas.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
-router.get('/:orderNumber', asyncHandler(getEscrowPublic));
-router.post('/:orderNumber/release', validateBody(escrowActionSchema), asyncHandler(handleReleaseEscrow));
-router.post('/:orderNumber/dispute', validateBody(escrowActionSchema), asyncHandler(handleDisputeEscrow));
+router.get('/:orderNumber', requireAuth, asyncHandler(getEscrowPublic));
+router.post('/:orderNumber/release', requireAuth, validateBody(escrowActionSchema), asyncHandler(handleReleaseEscrow));
+router.post('/:orderNumber/dispute', requireAuth, validateBody(escrowActionSchema), asyncHandler(handleDisputeEscrow));
 
 export default router;

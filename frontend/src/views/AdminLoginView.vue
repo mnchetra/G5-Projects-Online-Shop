@@ -46,7 +46,7 @@ async function submit() {
     <section class="admin-login-shell">
       <div class="login-brand-panel">
         <div class="login-brand-mark"><ShieldCheck :size="23" /></div>
-        <span class="login-eyebrow">MEKONG MARKET · CONTROL ROOM</span>
+        <span class="login-eyebrow">Tinh Tinh Online · CONTROL ROOM</span>
         <h1>Administrator<br />sign in</h1>
         <p>Access is limited to authorized store administrators. Activity may be monitored.</p>
         <div class="login-security-note"><span></span>Protected admin session</div>
@@ -61,7 +61,7 @@ async function submit() {
         <p class="mfa-not-ready">Multi-factor authentication is not yet configured for this server.</p>
       </form>
     </section>
-    <footer class="login-footer"><span>© 2026 Mekong Market</span><span>Administrator access only</span></footer>
+    <footer class="login-footer"><span>© 2026 Tinh Tinh Online</span><span>Administrator access only</span></footer>
   </main>
 </template>
 

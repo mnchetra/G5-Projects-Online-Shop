@@ -13,7 +13,6 @@ Base URL: `http://localhost:4000/api`. JSON responses use `{ "success": true, "d
 | POST | `/auth/register` | Create account and set session cookie |
 | POST | `/auth/login` | Sign in and set session cookie |
 | POST | `/auth/logout` | Clear session cookie |
-| POST | `/orders` | Guest or signed-in checkout (`CASH_ON_DELIVERY` or `ABA_KHQR`) |
 
 Example checkout:
 
@@ -30,15 +29,12 @@ Example checkout:
 }
 ```
 
-`paymentMethod` is optional and defaults to `CASH_ON_DELIVERY`. For `ABA_KHQR`, the backend requests a dynamic KHQR from the configured gateway using the server-calculated order total and order number. The response includes the QR image and payment reference. Payment status is polled through the local `/payments/aba/:orderNumber/status` endpoint, which verifies the order number and customer phone before checking the provider. Keep `BAKONG_ACCOUNT_ID`, `BAKONG_MERCHANT_NAME`, and `KHQR_API_BASE_URL` in backend environment variables only. The configured provider describes itself as an independent, unofficial integration platform; confirm its pricing and production terms before using it for live payments.
+`paymentMethod` defaults to `CASH_ON_DELIVERY`. Checkout requires a signed-in customer. For `ABA_KHQR` or `BAKONG_ESCROW`, the backend requests a dynamic KHQR from the configured gateway using the server-calculated order total and order number. Payment status can be polled through `/payments/aba/:orderNumber/status`; the app does not custody those payments in a smart contract. Keep `BAKONG_ACCOUNT_ID`, `BAKONG_MERCHANT_NAME`, and `KHQR_API_BASE_URL` in backend environment variables only. Confirm the provider's terms before using it for live payments.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | POST | `/payments/aba/:orderNumber/khqr` | Retry KHQR generation for a pending order; requires `{ "customerPhone": "..." }` |
 | POST | `/payments/aba/:orderNumber/status` | Check payment status; requires `{ "customerPhone": "..." }` |
-| GET | `/escrow/:orderNumber` | Public smart contract escrow status, addresses, and transaction hashes |
-| POST | `/escrow/:orderNumber/release` | Buyer confirms delivery & triggers smart contract release to seller |
-| POST | `/escrow/:orderNumber/dispute` | Buyer raises formal escrow dispute (`{ "reason": "...", "customerPhone": "..." }`) |
 
 ## Signed-In Customer
 
@@ -47,12 +43,19 @@ Example checkout:
 | GET | `/auth/me` | Current session |
 | GET / POST | `/cart` / `/cart/items` | Read cart / add item |
 | PATCH / DELETE | `/cart/items/:id` | Update quantity / remove item |
+| POST | `/orders` | Place an order (requires a signed-in account) |
 | GET | `/orders` | Order history including escrow status |
 | GET | `/orders/:orderNumber` | Order tracking and items |
+| GET | `/escrow/:orderNumber` | Read the signed-in customer's own hold status (administrators may inspect any order) |
+| POST | `/escrow/:orderNumber/release` | Confirm delivery for own order; records a status change only |
+| POST | `/escrow/:orderNumber/dispute` | Report an issue for own order (`{ "reason": "..." }`) |
+| GET | `/users/wallet` | Read own demo balance and latest 50 ledger entries |
 | GET / POST | `/users/addresses` | List / save delivery addresses |
 | PATCH | `/users/profile` | Update name and phone |
 
 Cart item requests use `{ "productId": "...", "quantity": 2 }`; quantity updates use `{ "quantity": 2 }`.
+
+Every customer starts with a USD demo balance of `0.00`. An administrator can credit or debit it with a required reason; adjustments are recorded with the administrator and resulting balance. For `DEMO_WALLET` checkout, the server atomically deducts the order total and records an `ORDER_HOLD` ledger entry. The escrow state remains held until that customer confirms delivery. This is demo credit only: no real funds are held or paid out. Admin-approved disputes can credit the demo balance back.
 
 ## Administrator
 
@@ -63,10 +66,12 @@ All routes require an authenticated user whose role is `ADMIN`.
 | GET | `/admin/dashboard` | Sales totals, customers, products, recent orders |
 | GET | `/admin/orders` | Browse orders |
 | PATCH | `/admin/orders/:id/status` | Update status, e.g. `{ "status": "SHIPPED" }` |
-| GET | `/admin/escrows` | Browse and filter all smart contract escrow agreements and stats |
-| POST | `/admin/escrows/:orderNumber/dispatch` | Seller dispatches order and starts inspection countdown (`{ "inspectionDays": 3 }`) |
-| POST | `/admin/escrows/:orderNumber/resolve` | Arbitrate dispute (`{ "resolution": "RELEASE_TO_SELLER" | "REFUND_TO_BUYER", "notes": "..." }`) |
+| GET | `/admin/escrows` | Browse database-tracked holds and status counts |
+| POST | `/admin/escrows/:orderNumber/dispatch` | Record dispatch and inspection window (`{ "inspectionDays": 3 }`) |
+| POST | `/admin/escrows/:orderNumber/resolve` | Resolve a dispute in the demo ledger; wallet refunds are credited (`{ "resolution": "RELEASE_TO_SELLER" | "REFUND_TO_BUYER", "notes": "..." }`) |
 | GET | `/admin/customers` | Browse customer accounts |
+| GET | `/admin/customers/:id/wallet` | Read a customer's demo balance and activity history |
+| POST | `/admin/customers/:id/wallet-adjustments` | Credit/debit demo balance with a required note; body: `{ "direction": "CREDIT" | "DEBIT", "amount": 25.50, "note": "..." }` |
 | POST / PUT / DELETE | `/admin/products` and `/admin/products/:id` | Create, update, or archive products |
 | POST / PUT / DELETE | `/admin/categories` and `/admin/categories/:id` | Create, update, or delete an unused category |
 | POST / DELETE | `/admin/products/:id/images` and `/admin/products/:id/images/:imageId` | Upload (multipart field `image`) or remove a product image |

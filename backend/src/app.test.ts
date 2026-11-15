@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { app } from './app.js';
-import { checkoutSchema } from './validators/schemas.js';
+import { checkoutSchema, walletAdjustmentSchema } from './validators/schemas.js';
 
 describe('API', () => {
   it('reports healthy without requiring a database connection', async () => {
@@ -28,6 +28,17 @@ describe('API', () => {
     expect(response.body.error.message).toBe('Authentication required');
   });
 
+  it('protects wallet adjustments and escrow actions from unauthenticated requests', async () => {
+    const adjustment = await request(app).post('/api/admin/customers/customer-id/wallet-adjustments').send({
+      direction: 'CREDIT',
+      amount: 10,
+      note: 'Test credit'
+    });
+    const release = await request(app).post('/api/escrow/order-id/release').send({});
+    expect(adjustment.status).toBe(401);
+    expect(release.status).toBe(401);
+  });
+
   it('requires authentication before checkout', async () => {
     const response = await request(app).post('/api/orders').send({});
     expect(response.status).toBe(401);
@@ -46,5 +57,12 @@ describe('API', () => {
 
     expect(checkoutSchema.parse(checkout).paymentMethod).toBe('CASH_ON_DELIVERY');
     expect(checkoutSchema.parse({ ...checkout, paymentMethod: 'ABA_KHQR' }).paymentMethod).toBe('ABA_KHQR');
+    expect(checkoutSchema.parse({ ...checkout, paymentMethod: 'DEMO_WALLET' }).paymentMethod).toBe('DEMO_WALLET');
+  });
+
+  it('validates demo wallet adjustments and rejects amounts with fractional cents', () => {
+    expect(walletAdjustmentSchema.safeParse({ direction: 'CREDIT', amount: 25.5, note: 'Customer demo credit' }).success).toBe(true);
+    expect(walletAdjustmentSchema.safeParse({ direction: 'DEBIT', amount: 1.005, note: 'Correction' }).success).toBe(false);
+    expect(walletAdjustmentSchema.safeParse({ direction: 'DEBIT', amount: 0, note: 'Correction' }).success).toBe(false);
   });
 });

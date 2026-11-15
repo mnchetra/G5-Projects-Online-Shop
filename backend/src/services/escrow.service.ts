@@ -1,66 +1,6 @@
-import crypto from 'node:crypto';
 import { EscrowStatus, OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../utils/http.js';
-
-export const ESCROW_CONTRACT_METADATA = {
-  contractName: 'BakongEscrow',
-  contractAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
-  contractNetwork: 'Bakong EVM L2 Testnet',
-  chainId: 855,
-  compilerVersion: 'v0.8.20+commit.a1b79de6',
-  arbiterAddress: '0x12E9f7c00e668D8Fa3e93B474a001a1f0a2c9431',
-  sellerDefaultAddress: '0x34A7B8233eD0c40e11894a4D2aA21D124806a771',
-  explorerBaseUrl: 'https://explorer.bakong.org.kh/tx/'
-};
-
-export function generateEvmTxHash(prefix: string, seed: string): string {
-  const hash = crypto.createHash('sha256').update(`${prefix}-${seed}-${Date.now()}-${Math.random()}`).digest('hex');
-  return `0x${hash}`;
-}
-
-export function generateWalletAddress(seed: string): string {
-  const hash = crypto.createHash('sha256').update(seed).digest('hex');
-  return `0x${hash.slice(0, 40)}`;
-}
-
-export async function initiateEscrow(params: {
-  orderId: string;
-  orderNumber: string;
-  amount: number | Prisma.Decimal;
-  customerPhone: string;
-  buyerAddress?: string;
-  sellerAddress?: string;
-}) {
-  const buyerAddress = params.buyerAddress || generateWalletAddress(`buyer-${params.customerPhone}`);
-  const sellerAddress = params.sellerAddress || ESCROW_CONTRACT_METADATA.sellerDefaultAddress;
-  const arbiterAddress = ESCROW_CONTRACT_METADATA.arbiterAddress;
-
-  const creationTxHash = generateEvmTxHash('escrow-create', params.orderNumber);
-
-  return prisma.escrowRecord.upsert({
-    where: { orderId: params.orderId },
-    update: {
-      amount: new Prisma.Decimal(params.amount),
-      buyerAddress,
-      sellerAddress,
-      arbiterAddress,
-      txHash: creationTxHash
-    },
-    create: {
-      orderId: params.orderId,
-      contractAddress: ESCROW_CONTRACT_METADATA.contractAddress,
-      contractNetwork: ESCROW_CONTRACT_METADATA.contractNetwork,
-      txHash: creationTxHash,
-      buyerAddress,
-      sellerAddress,
-      arbiterAddress,
-      amount: new Prisma.Decimal(params.amount),
-      status: EscrowStatus.INITIATED,
-      inspectionDays: 3
-    }
-  });
-}
 
 export async function lockEscrowFunds(params: {
   orderNumber: string;
@@ -74,8 +14,6 @@ export async function lockEscrowFunds(params: {
 
   if (!order) throw new HttpError(404, 'Order not found');
 
-  const lockTxHash = generateEvmTxHash('escrow-lock', `${params.orderNumber}-${params.bakongMd5}`);
-
   const updatedEscrow = await prisma.escrowRecord.update({
     where: { orderId: order.id },
     data: {
@@ -83,7 +21,7 @@ export async function lockEscrowFunds(params: {
       bakongMd5: params.bakongMd5,
       bakongAccountId: params.bakongAccountId || process.env.BAKONG_ACCOUNT_ID,
       lockedAt: new Date(),
-      txHash: order.escrow?.txHash || lockTxHash
+      txHash: null
     }
   });
 
@@ -139,43 +77,53 @@ export async function markEscrowDispatched(orderNumber: string, customInspection
   return escrow;
 }
 
-export async function releaseEscrowFunds(orderNumber: string, customerPhone?: string) {
+export async function releaseEscrowFunds(orderNumber: string, userId: string) {
   const order = await prisma.order.findUnique({
     where: { orderNumber },
     include: { escrow: true, payment: true }
   });
 
   if (!order || !order.escrow) throw new HttpError(404, 'Escrow agreement not found');
-
-  if (customerPhone && order.customerPhone !== customerPhone) {
-    throw new HttpError(403, 'Phone number does not match order record');
-  }
+  if (order.userId !== userId) throw new HttpError(403, 'Only the customer who placed this order can confirm delivery');
 
   if (order.escrow.status !== EscrowStatus.FUNDS_LOCKED && order.escrow.status !== EscrowStatus.DISPATCHED) {
     throw new HttpError(409, `Cannot release funds when escrow is in ${order.escrow.status} state`);
   }
 
-  const releaseTxHash = generateEvmTxHash('escrow-release', orderNumber);
-
-  const [escrow] = await prisma.$transaction([
-    prisma.escrowRecord.update({
-      where: { id: order.escrow.id },
+  const isDemoWallet = order.paymentMethod === 'DEMO_WALLET';
+  const releaseTxHash = null;
+  const escrow = await prisma.$transaction(async (tx) => {
+    const transitioned = await tx.escrowRecord.updateMany({
+      where: { id: order.escrow!.id, status: { in: [EscrowStatus.FUNDS_LOCKED, EscrowStatus.DISPATCHED] } },
       data: {
         status: EscrowStatus.RELEASED,
         releaseTxHash,
         releasedAt: new Date()
       }
-    }),
-    prisma.order.update({
-      where: { id: order.id },
-      data: { status: OrderStatus.DELIVERED }
-    })
-  ]);
+    });
+    if (transitioned.count !== 1) throw new HttpError(409, 'Escrow status changed before delivery could be confirmed');
+    await tx.order.update({ where: { id: order.id }, data: { status: OrderStatus.DELIVERED } });
+    if (isDemoWallet && order.userId) {
+      const customer = await tx.user.findUniqueOrThrow({ where: { id: order.userId }, select: { walletBalance: true } });
+      await tx.walletTransaction.create({
+        data: {
+          userId: order.userId,
+          actorUserId: userId,
+          orderId: order.id,
+          type: 'ORDER_RELEASE',
+          amount: order.total,
+          balanceAfter: customer.walletBalance,
+          note: `Demo wallet hold released to store for order ${orderNumber}; no real payout`
+        }
+      });
+    }
+    return tx.escrowRecord.findUniqueOrThrow({ where: { id: order.escrow!.id } });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
   return { escrow, releaseTxHash };
 }
 
-export async function disputeEscrow(orderNumber: string, reason: string, customerPhone?: string) {
+export async function disputeEscrow(orderNumber: string, reason: string, userId: string) {
   if (!reason || reason.trim().length < 5) {
     throw new HttpError(400, 'Please provide a detailed dispute reason (minimum 5 characters)');
   }
@@ -186,28 +134,28 @@ export async function disputeEscrow(orderNumber: string, reason: string, custome
   });
 
   if (!order || !order.escrow) throw new HttpError(404, 'Escrow agreement not found');
-
-  if (customerPhone && order.customerPhone !== customerPhone) {
-    throw new HttpError(403, 'Phone number does not match order record');
-  }
+  if (order.userId !== userId) throw new HttpError(403, 'Only the customer who placed this order can file a dispute');
 
   if (order.escrow.status !== EscrowStatus.FUNDS_LOCKED && order.escrow.status !== EscrowStatus.DISPATCHED) {
     throw new HttpError(409, `Dispute cannot be filed while escrow is in ${order.escrow.status} state`);
   }
 
-  return prisma.escrowRecord.update({
-    where: { id: order.escrow.id },
+  const updated = await prisma.escrowRecord.updateMany({
+    where: { id: order.escrow.id, status: { in: [EscrowStatus.FUNDS_LOCKED, EscrowStatus.DISPATCHED] } },
     data: {
       status: EscrowStatus.DISPUTED,
       disputeReason: reason.trim()
     }
   });
+  if (updated.count !== 1) throw new HttpError(409, 'Escrow status changed before the dispute could be filed');
+  return prisma.escrowRecord.findUniqueOrThrow({ where: { id: order.escrow.id } });
 }
 
 export async function resolveEscrowDispute(
   orderNumber: string,
   resolution: 'RELEASE_TO_SELLER' | 'REFUND_TO_BUYER',
-  resolutionNotes: string
+  resolutionNotes: string,
+  actorUserId: string
 ) {
   const order = await prisma.order.findUnique({
     where: { orderNumber },
@@ -218,59 +166,86 @@ export async function resolveEscrowDispute(
   if (order.escrow.status !== EscrowStatus.DISPUTED) {
     throw new HttpError(409, 'Only disputed escrows can be arbitrated');
   }
+  const escrowId = order.escrow.id;
+  const disputeReason = order.escrow.disputeReason;
 
   if (resolution === 'RELEASE_TO_SELLER') {
-    const releaseTxHash = generateEvmTxHash('arbiter-release', orderNumber);
-    const [escrow] = await prisma.$transaction([
-      prisma.escrowRecord.update({
-        where: { id: order.escrow.id },
+    const releaseTxHash = null;
+    const escrow = await prisma.$transaction(async (tx) => {
+      const transitioned = await tx.escrowRecord.updateMany({
+        where: { id: escrowId, status: EscrowStatus.DISPUTED },
         data: {
           status: EscrowStatus.RELEASED,
           releaseTxHash,
           releasedAt: new Date(),
-          disputeReason: `${order.escrow.disputeReason || ''}\n[Arbitration Note]: ${resolutionNotes}`.trim()
+          disputeReason: `${disputeReason || ''}\n[Arbitration Note]: ${resolutionNotes}`.trim()
         }
-      }),
-      prisma.order.update({
-        where: { id: order.id },
-        data: { status: OrderStatus.DELIVERED }
-      })
-    ]);
+      });
+      if (transitioned.count !== 1) throw new HttpError(409, 'Escrow is no longer disputed');
+      await tx.order.update({ where: { id: order.id }, data: { status: OrderStatus.DELIVERED } });
+      if (order.paymentMethod === 'DEMO_WALLET' && order.userId) {
+        const customer = await tx.user.findUniqueOrThrow({ where: { id: order.userId }, select: { walletBalance: true } });
+        await tx.walletTransaction.create({
+          data: {
+            userId: order.userId,
+            actorUserId,
+            orderId: order.id,
+            type: 'ORDER_RELEASE',
+            amount: order.total,
+            balanceAfter: customer.walletBalance,
+            note: `Demo wallet hold released to store after dispute resolution for order ${orderNumber}; no real payout`
+          }
+        });
+      }
+      return tx.escrowRecord.findUniqueOrThrow({ where: { id: escrowId } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return { escrow, resolution: 'RELEASE_TO_SELLER' };
   }
 
   // REFUND_TO_BUYER
-  const refundTxHash = generateEvmTxHash('arbiter-refund', orderNumber);
-  const [escrow] = await prisma.$transaction([
-    prisma.escrowRecord.update({
-      where: { id: order.escrow.id },
+  const refundTxHash = null;
+  const escrow = await prisma.$transaction(async (tx) => {
+    const transitioned = await tx.escrowRecord.updateMany({
+      where: { id: escrowId, status: EscrowStatus.DISPUTED },
       data: {
         status: EscrowStatus.REFUNDED,
         refundTxHash,
         refundedAt: new Date(),
-        disputeReason: `${order.escrow.disputeReason || ''}\n[Refund Granted]: ${resolutionNotes}`.trim()
+        disputeReason: `${disputeReason || ''}\n[Refund Granted]: ${resolutionNotes}`.trim()
       }
-    }),
-    prisma.order.update({
-      where: { id: order.id },
-      data: { status: OrderStatus.CANCELLED }
-    }),
-    prisma.payment.updateMany({
-      where: { orderId: order.id },
-      data: { status: PaymentStatus.REFUNDED }
-    }),
-    // Restock items
-    ...order.items.map((item) =>
-      item.productId
-        ? prisma.product.update({ where: { id: item.productId }, data: { stock: { increment: item.quantity } } })
-        : prisma.$executeRaw`SELECT 1`
-    )
-  ]);
+    });
+    if (transitioned.count !== 1) throw new HttpError(409, 'Escrow is no longer disputed');
+    await tx.order.update({ where: { id: order.id }, data: { status: OrderStatus.CANCELLED } });
+    await tx.payment.updateMany({ where: { orderId: order.id }, data: { status: PaymentStatus.REFUNDED } });
+    for (const item of order.items) {
+      if (item.productId) await tx.product.update({ where: { id: item.productId }, data: { stock: { increment: item.quantity } } });
+    }
+    if (order.paymentMethod === 'DEMO_WALLET') {
+      if (!order.userId) throw new HttpError(409, 'Cannot refund a demo wallet order without its customer account');
+      const customer = await tx.user.update({
+        where: { id: order.userId },
+        data: { walletBalance: { increment: order.total } },
+        select: { walletBalance: true }
+      });
+      await tx.walletTransaction.create({
+        data: {
+          userId: order.userId,
+          actorUserId,
+          orderId: order.id,
+          type: 'ORDER_REFUND',
+          amount: order.total,
+          balanceAfter: customer.walletBalance,
+          note: `Demo wallet refund for order ${orderNumber}: ${resolutionNotes}`
+        }
+      });
+    }
+    return tx.escrowRecord.findUniqueOrThrow({ where: { id: escrowId } });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
   return { escrow, resolution: 'REFUND_TO_BUYER' };
 }
 
-export async function getEscrowDetails(orderNumber: string) {
+export async function getEscrowDetails(orderNumber: string, userId: string, userRole?: string) {
   const order = await prisma.order.findUnique({
     where: { orderNumber },
     include: {
@@ -281,6 +256,7 @@ export async function getEscrowDetails(orderNumber: string) {
   });
 
   if (!order) throw new HttpError(404, 'Order not found');
+  if (order.userId !== userId && userRole !== 'ADMIN') throw new HttpError(403, 'You can only view escrow details for your own orders');
 
   return {
     orderNumber: order.orderNumber,
@@ -294,7 +270,6 @@ export async function getEscrowDetails(orderNumber: string) {
     qrString: order.payment?.qrString,
     bakongRef: order.payment?.providerRef,
     escrow: order.escrow,
-    contract: ESCROW_CONTRACT_METADATA,
     items: order.items,
     createdAt: order.createdAt
   };
@@ -328,6 +303,7 @@ export async function listAdminEscrows(filter?: { status?: EscrowStatus; search?
             customerName: true,
             customerPhone: true,
             total: true,
+            paymentMethod: true,
             status: true,
             createdAt: true,
             items: true

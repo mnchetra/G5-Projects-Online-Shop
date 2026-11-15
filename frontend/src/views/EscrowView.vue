@@ -3,15 +3,14 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import {
-  ShieldCheck, ArrowLeft, CheckCircle2, Clock, AlertTriangle, ExternalLink,
-  Copy, Check, Lock, Unlock, FileCode2, Scale, RefreshCw, Send, Search
+  ShieldCheck, ArrowLeft, CheckCircle2, Clock, AlertTriangle,
+  Check, Lock, Unlock, Scale, RefreshCw, Search
 } from 'lucide-vue-next';
 import { api, apiErrorMessage } from '../services/api';
 
 type EscrowDetails = {
   orderNumber: string;
   customerName: string;
-  customerPhone: string;
   orderStatus: string;
   total: number | string;
   paymentMethod: string;
@@ -20,15 +19,7 @@ type EscrowDetails = {
   bakongRef?: string;
   escrow: {
     id: string;
-    contractAddress: string;
-    contractNetwork: string;
-    txHash?: string;
-    releaseTxHash?: string;
-    refundTxHash?: string;
     disputeReason?: string;
-    buyerAddress: string;
-    sellerAddress: string;
-    arbiterAddress: string;
     amount: number | string;
     bakongMd5?: string;
     status: 'INITIATED' | 'FUNDS_LOCKED' | 'DISPATCHED' | 'RELEASED' | 'DISPUTED' | 'REFUNDED';
@@ -40,14 +31,6 @@ type EscrowDetails = {
     refundedAt?: string;
     createdAt: string;
   } | null;
-  contract: {
-    contractName: string;
-    contractAddress: string;
-    contractNetwork: string;
-    chainId: number;
-    arbiterAddress: string;
-    explorerBaseUrl: string;
-  };
   items: {
     id: string;
     productNameEn: string;
@@ -69,16 +52,15 @@ const error = ref('');
 const successMessage = ref('');
 const escrowData = ref<EscrowDetails | null>(null);
 const searchInput = ref('');
-const copiedField = ref('');
 
 // Buyer action states
 const actionLoading = ref(false);
 const showDisputeModal = ref(false);
 const disputeReason = ref('');
 const showReleaseModal = ref(false);
-const buyerPhoneConfirm = ref('');
 
 const isKhmer = computed(() => locale.value === 'km');
+const isDemoWallet = computed(() => escrowData.value?.paymentMethod === 'DEMO_WALLET');
 const money = (val: number | string) =>
   new Intl.NumberFormat(isKhmer.value ? 'km-KH' : 'en-US', { style: 'currency', currency: 'USD' }).format(Number(val));
 
@@ -96,26 +78,34 @@ const timelineSteps = computed(() => {
 
   return [
     {
-      title: t('escrow.stepInitiated'),
-      desc: 'Smart contract escrow agreement deployed on Bakong EVM',
+      title: t('demoWallet.initiated'),
+      desc: isDemoWallet.value ? t('demoWallet.walletNotice') : t('demoWallet.trackerNotice'),
       time: e?.createdAt,
       state: 'done'
     },
     {
-      title: t('escrow.stepLocked'),
-      desc: e?.bakongMd5 ? `Bakong KHQR verified (${e.bakongMd5.slice(0, 8)}...). Funds held in vault.` : 'Awaiting payment confirmation via Bakong KHQR',
+      title: t('demoWallet.locked'),
+      desc: isDemoWallet.value
+        ? t('demoWallet.locked')
+        : e?.bakongMd5
+          ? t('demoWallet.paymentHint')
+          : 'Awaiting payment confirmation via Bakong KHQR.',
       time: e?.lockedAt,
       state: status === 'INITIATED' ? 'active' : status ? 'done' : 'pending'
     },
     {
-      title: t('escrow.stepDispatched'),
-      desc: e?.autoReleaseAt ? `Shipped. 3-day buyer inspection active.` : 'Seller preparing goods for tracked delivery',
+      title: t('demoWallet.dispatched'),
+      desc: e?.autoReleaseAt ? t('demoWallet.inspectionNotice') : 'Seller preparing goods for tracked delivery.',
       time: e?.dispatchedAt,
       state: status === 'FUNDS_LOCKED' ? 'pending' : status === 'DISPATCHED' ? 'active' : (status === 'RELEASED' || status === 'DISPUTED' || status === 'REFUNDED') ? 'done' : 'pending'
     },
     {
-      title: status === 'DISPUTED' ? t('escrow.stepDisputed') : status === 'REFUNDED' ? t('escrow.stepRefunded') : t('escrow.stepReleased'),
-      desc: status === 'RELEASED' ? 'Buyer confirmed receipt; funds transferred to seller.' : status === 'DISPUTED' ? 'Dispute submitted. Arbiter reviewing evidence.' : status === 'REFUNDED' ? 'Refund approved and executed back to buyer.' : 'Awaiting buyer inspection & final release',
+      title: status === 'DISPUTED' ? t('demoWallet.disputed') : status === 'REFUNDED' ? t('demoWallet.refunded') : t('demoWallet.released'),
+      desc: status === 'RELEASED'
+        ? t('demoWallet.released')
+        : status === 'DISPUTED' ? t('demoWallet.disputed')
+          : status === 'REFUNDED' ? t('demoWallet.refunded')
+            : 'Awaiting buyer inspection and delivery confirmation.',
       time: e?.releasedAt || e?.refundedAt,
       state: status === 'RELEASED' || status === 'REFUNDED' ? 'done' : status === 'DISPUTED' ? 'warning' : 'pending'
     }
@@ -148,10 +138,8 @@ async function executeRelease() {
   error.value = '';
   successMessage.value = '';
   try {
-    const { data } = await api.post(`/escrow/${encodeURIComponent(escrowData.value.orderNumber)}/release`, {
-      customerPhone: buyerPhoneConfirm.value || escrowData.value.customerPhone
-    });
-    successMessage.value = data.data.message || 'Funds released successfully!';
+    const { data } = await api.post(`/escrow/${encodeURIComponent(escrowData.value.orderNumber)}/release`, {});
+    successMessage.value = data.data.message || 'Delivery confirmation recorded.';
     showReleaseModal.value = false;
     await loadEscrow(escrowData.value.orderNumber);
   } catch (err) {
@@ -168,8 +156,7 @@ async function executeDispute() {
   successMessage.value = '';
   try {
     const { data } = await api.post(`/escrow/${encodeURIComponent(escrowData.value.orderNumber)}/dispute`, {
-      reason: disputeReason.value.trim(),
-      customerPhone: buyerPhoneConfirm.value || escrowData.value.customerPhone
+      reason: disputeReason.value.trim()
     });
     successMessage.value = data.data.message || 'Dispute submitted successfully';
     showDisputeModal.value = false;
@@ -179,12 +166,6 @@ async function executeDispute() {
   } finally {
     actionLoading.value = false;
   }
-}
-
-function copyToClipboard(text: string, label: string) {
-  navigator.clipboard.writeText(text);
-  copiedField.value = label;
-  setTimeout(() => { copiedField.value = ''; }, 2000);
 }
 
 onMounted(() => {
@@ -243,9 +224,9 @@ watch(currentOrderNumber, (newVal) => {
         <div class="hero-header">
           <div>
             <span class="escrow-tag">
-              <ShieldCheck :size="14" /> {{ t('escrow.badge') }}
+              <ShieldCheck :size="14" /> {{ t('demoWallet.badge') }}
             </span>
-            <h1>{{ t('escrow.title') }}</h1>
+            <h1>{{ t('demoWallet.escrowTitle') }}</h1>
             <p class="order-ref-text">
               Order: <strong>{{ escrowData.orderNumber }}</strong> · {{ escrowData.customerName }}
             </p>
@@ -272,8 +253,8 @@ watch(currentOrderNumber, (newVal) => {
           <div class="action-info">
             <Lock :size="18" class="icon-lock" />
             <div>
-              <strong>Funds Held in Smart Contract Vault</strong>
-              <p>{{ t('escrow.inspectionNotice') }}</p>
+              <strong>{{ isDemoWallet ? t('demoWallet.walletNotice') : t('demoWallet.trackerNotice') }}</strong>
+              <p>{{ t('demoWallet.inspectionNotice') }}</p>
             </div>
           </div>
           <div class="action-buttons">
@@ -282,14 +263,14 @@ watch(currentOrderNumber, (newVal) => {
               type="button"
               @click="showReleaseModal = true"
             >
-              <CheckCircle2 :size="16" /> {{ t('escrow.releaseBtn') }}
+              <CheckCircle2 :size="16" /> {{ t('demoWallet.confirmDelivery') }}
             </button>
             <button
               class="button button-outline danger-btn"
               type="button"
               @click="showDisputeModal = true"
             >
-              <AlertTriangle :size="16" /> {{ t('escrow.disputeBtn') }}
+              <AlertTriangle :size="16" /> {{ t('demoWallet.reportIssue') }}
             </button>
           </div>
         </div>
@@ -298,9 +279,9 @@ watch(currentOrderNumber, (newVal) => {
         <div v-else-if="escrowData.escrow?.status === 'DISPUTED'" class="dispute-notice-card">
           <Scale :size="20" />
           <div>
-            <strong>Dispute Under Neutral Arbitration</strong>
+            <strong>Dispute submitted for administrator review</strong>
             <p>Reason: "{{ escrowData.escrow.disputeReason }}"</p>
-            <small>{{ t('escrow.arbitrationNotice') }}</small>
+            <small>No decentralized or smart-contract arbitration is active in this demo.</small>
           </div>
         </div>
 
@@ -308,8 +289,8 @@ watch(currentOrderNumber, (newVal) => {
         <div v-else-if="escrowData.escrow?.status === 'RELEASED'" class="released-notice-card">
           <Unlock :size="20" />
           <div>
-            <strong>Escrow Completed & Funds Released</strong>
-            <p>Smart contract release has executed and payouts are finalized.</p>
+            <strong>Delivery confirmed; demo status released</strong>
+            <p>No smart-contract transaction or real payout was made.</p>
           </div>
         </div>
       </section>
@@ -341,116 +322,16 @@ watch(currentOrderNumber, (newVal) => {
           </div>
         </section>
 
-        <!-- Smart Contract Details Section -->
+        <!-- Demo escrow notice -->
         <section class="escrow-card contract-card">
-          <div class="card-title-row">
-            <h2>{{ t('escrow.contract') }}</h2>
-            <span class="chain-badge">{{ escrowData.contract.contractNetwork }} (Chain ID: {{ escrowData.contract.chainId }})</span>
-          </div>
-
-          <div class="contract-fields">
-            <div class="field-item">
-              <span class="field-label">{{ t('escrow.contractAddress') }}</span>
-              <div class="hash-box">
-                <code>{{ escrowData.contract.contractAddress }}</code>
-                <button
-                  type="button"
-                  class="copy-btn"
-                  @click="copyToClipboard(escrowData.contract.contractAddress, 'contract')"
-                >
-                  <Check v-if="copiedField === 'contract'" :size="13" />
-                  <Copy v-else :size="13" />
-                </button>
-              </div>
-            </div>
-
-            <div v-if="escrowData.escrow?.txHash" class="field-item">
-              <span class="field-label">Creation Tx Hash</span>
-              <div class="hash-box">
-                <code>{{ escrowData.escrow.txHash }}</code>
-                <button
-                  type="button"
-                  class="copy-btn"
-                  @click="copyToClipboard(escrowData.escrow.txHash!, 'txHash')"
-                >
-                  <Check v-if="copiedField === 'txHash'" :size="13" />
-                  <Copy v-else :size="13" />
-                </button>
-              </div>
-            </div>
-
-            <div v-if="escrowData.escrow?.releaseTxHash" class="field-item">
-              <span class="field-label">Release Execution Tx Hash</span>
-              <div class="hash-box">
-                <code>{{ escrowData.escrow.releaseTxHash }}</code>
-                <button
-                  type="button"
-                  class="copy-btn"
-                  @click="copyToClipboard(escrowData.escrow.releaseTxHash!, 'releaseTx')"
-                >
-                  <Check v-if="copiedField === 'releaseTx'" :size="13" />
-                  <Copy v-else :size="13" />
-                </button>
-              </div>
-            </div>
-
-            <div v-if="escrowData.escrow?.refundTxHash" class="field-item">
-              <span class="field-label">Refund Execution Tx Hash</span>
-              <div class="hash-box">
-                <code>{{ escrowData.escrow.refundTxHash }}</code>
-                <button
-                  type="button"
-                  class="copy-btn"
-                  @click="copyToClipboard(escrowData.escrow.refundTxHash!, 'refundTx')"
-                >
-                  <Check v-if="copiedField === 'refundTx'" :size="13" />
-                  <Copy v-else :size="13" />
-                </button>
-              </div>
-            </div>
-
-            <div class="field-grid-two">
-              <div class="field-item">
-                <span class="field-label">{{ t('escrow.buyer') }}</span>
-                <div class="hash-box">
-                  <code>{{ escrowData.escrow?.buyerAddress }}</code>
-                </div>
-              </div>
-              <div class="field-item">
-                <span class="field-label">{{ t('escrow.seller') }}</span>
-                <div class="hash-box">
-                  <code>{{ escrowData.escrow?.sellerAddress }}</code>
-                </div>
-              </div>
-            </div>
-
-            <div class="field-item">
-              <span class="field-label">{{ t('escrow.arbiter') }}</span>
-              <div class="hash-box">
-                <code>{{ escrowData.contract.arbiterAddress }}</code>
-              </div>
-            </div>
-
-            <div v-if="escrowData.escrow?.bakongMd5" class="field-item">
-              <span class="field-label">{{ t('escrow.bakongRef') }} (MD5)</span>
-              <div class="hash-box">
-                <code>{{ escrowData.escrow.bakongMd5 }}</code>
-                <button
-                  type="button"
-                  class="copy-btn"
-                  @click="copyToClipboard(escrowData.escrow.bakongMd5!, 'bakongRef')"
-                >
-                  <Check v-if="copiedField === 'bakongRef'" :size="13" />
-                  <Copy v-else :size="13" />
-                </button>
-              </div>
-            </div>
-          </div>
+          <h2>{{ t('demoWallet.escrowTitle') }}</h2>
+          <p v-if="isDemoWallet">{{ t('demoWallet.walletNotice') }}</p>
+          <p v-else>{{ t('demoWallet.trackerNotice') }}</p>
         </section>
 
         <!-- Order Items in this Escrow -->
         <section class="escrow-card items-card">
-          <h2>Items Protected by Escrow</h2>
+          <h2>Items in this order</h2>
           <div class="item-list">
             <div v-for="item in escrowData.items" :key="item.id" class="item-row">
               <div>
@@ -467,8 +348,8 @@ watch(currentOrderNumber, (newVal) => {
     <!-- Empty Prompt if no order loaded -->
     <div v-else class="empty-escrow-search">
       <ShieldCheck :size="48" class="shield-big" />
-      <h2>Bakong Smart Contract Escrow Explorer</h2>
-      <p>Enter any Mekong Market order number above to inspect on-chain escrow lock, tracking, and dispute state.</p>
+      <h2>{{ t('demoWallet.escrowTitle') }}</h2>
+      <p>{{ t('demoWallet.trackerNotice') }}</p>
     </div>
 
     <!-- Release Funds Confirmation Modal -->
@@ -476,17 +357,13 @@ watch(currentOrderNumber, (newVal) => {
       <div class="modal-box">
         <div class="modal-header">
           <CheckCircle2 :size="24" class="icon-success" />
-          <h3>Confirm Delivery & Release Funds</h3>
+          <h3>{{ t('demoWallet.confirmDelivery') }}</h3>
         </div>
-        <p>{{ t('escrow.releaseConfirmPrompt') }}</p>
-        <label class="form-field">
-          <span>Confirm Customer Phone Number *</span>
-          <input v-model.trim="buyerPhoneConfirm" type="tel" :placeholder="escrowData?.customerPhone" />
-        </label>
+        <p>{{ t('demoWallet.releaseConfirm') }}</p>
         <div class="modal-actions">
           <button class="button button-outline" type="button" @click="showReleaseModal = false">Cancel</button>
           <button class="button button-success" type="button" :disabled="actionLoading" @click="executeRelease">
-            {{ actionLoading ? 'Releasing on-chain...' : 'Confirm & Release Payout' }}
+            {{ actionLoading ? t('common.loading') : t('demoWallet.confirmDelivery') }}
           </button>
         </div>
       </div>
@@ -497,16 +374,12 @@ watch(currentOrderNumber, (newVal) => {
       <div class="modal-box">
         <div class="modal-header">
           <AlertTriangle :size="24" class="icon-danger" />
-          <h3>Open Escrow Dispute</h3>
+          <h3>{{ t('demoWallet.reportIssue') }}</h3>
         </div>
-        <p>{{ t('escrow.disputeReasonPrompt') }}</p>
+          <p>{{ t('demoWallet.disputePrompt') }}</p>
         <label class="form-field">
           <span>Dispute Reason / Evidence *</span>
           <textarea v-model.trim="disputeReason" rows="3" placeholder="Goods not received, damaged during shipment, or item mismatch..."></textarea>
-        </label>
-        <label class="form-field">
-          <span>Confirm Customer Phone Number *</span>
-          <input v-model.trim="buyerPhoneConfirm" type="tel" :placeholder="escrowData?.customerPhone" />
         </label>
         <div class="modal-actions">
           <button class="button button-outline" type="button" @click="showDisputeModal = false">Cancel</button>

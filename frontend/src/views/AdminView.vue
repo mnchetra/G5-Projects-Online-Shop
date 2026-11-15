@@ -13,6 +13,8 @@ import type { Product } from '../data/products';
 type AdminOrder = { id: string; orderNumber: string; customerName: string; customerPhone: string; total: number; status: string; createdAt: string; payment?: { status: string; method: string; amount: number; providerRef?: string | null } | null };
 type AdminCategory = { id: string; slug: string; nameEn: string; nameKm: string; descriptionEn?: string | null; descriptionKm?: string | null; imageUrl?: string | null; sortOrder: number };
 type AdminProduct = Product & { categoryId: string; isActive: boolean; imageRecords: { id: string; url: string }[] };
+type AdminCustomer = { id: string; name: string; email: string; phone?: string; walletBalance: number | string; createdAt?: string; _count: { orders: number } };
+type AdminWalletTransaction = { id: string; type: string; amount: number | string; balanceAfter: number | string; note?: string | null; createdAt: string; actor?: { name: string; email: string } | null; order?: { orderNumber: string } | null };
 
 const { t, locale } = useI18n();
 const tab = ref('dashboard');
@@ -22,13 +24,19 @@ const busy = ref(false);
 const error = ref('');
 const showProductForm = ref(false);
 const showCategoryForm = ref(false);
+const walletCustomer = ref<AdminCustomer | null>(null);
+const walletTransactions = ref<AdminWalletTransaction[]>([]);
+const walletLoading = ref(false);
+const walletBusy = ref(false);
+const walletError = ref('');
+const walletForm = reactive({ direction: 'CREDIT' as 'CREDIT' | 'DEBIT', amount: 0, note: '' });
 const editingProductId = ref<string | null>(null);
 const editingCategoryId = ref<string | null>(null);
 const imageFile = ref<File | null>(null);
 const stats = ref({ orders: 0, customers: 0, products: 0, revenue: 0 });
 const products = ref<AdminProduct[]>([]);
 const orders = ref<AdminOrder[]>([]);
-const customers = ref<{ id: string; name: string; email: string; phone?: string; createdAt?: string; _count: { orders: number } }[]>([]);
+const customers = ref<AdminCustomer[]>([]);
 const categories = ref<AdminCategory[]>([]);
 const form = reactive({ slug: '', sku: '', nameEn: '', nameKm: '', descriptionEn: '', descriptionKm: '', price: 0, stock: 0, categoryId: '', imageUrl: '', isFeatured: false, isActive: true });
 const categoryForm = reactive({ slug: '', nameEn: '', nameKm: '', descriptionEn: '', descriptionKm: '', imageUrl: '', sortOrder: 0 });
@@ -86,6 +94,42 @@ async function loadDashboard() {
     error.value = apiErrorMessage(exception);
   } finally {
     loading.value = false;
+  }
+}
+
+async function openWallet(customer: AdminCustomer) {
+  walletCustomer.value = customer;
+  walletTransactions.value = [];
+  walletError.value = '';
+  walletForm.direction = 'CREDIT';
+  walletForm.amount = 0;
+  walletForm.note = '';
+  walletLoading.value = true;
+  try {
+    const { data } = await api.get(`/admin/customers/${encodeURIComponent(customer.id)}/wallet`);
+    walletTransactions.value = data.data.transactions;
+  } catch (exception) {
+    walletError.value = apiErrorMessage(exception);
+  } finally {
+    walletLoading.value = false;
+  }
+}
+
+async function saveWalletAdjustment() {
+  if (!walletCustomer.value) return;
+  walletBusy.value = true;
+  walletError.value = '';
+  try {
+    const { data } = await api.post(`/admin/customers/${encodeURIComponent(walletCustomer.value.id)}/wallet-adjustments`, walletForm);
+    const balance = data.data.walletBalance;
+    const customer = customers.value.find((item) => item.id === walletCustomer.value?.id);
+    if (customer) customer.walletBalance = balance;
+    walletCustomer.value = { ...walletCustomer.value, walletBalance: balance };
+    await openWallet(walletCustomer.value);
+  } catch (exception) {
+    walletError.value = apiErrorMessage(exception);
+  } finally {
+    walletBusy.value = false;
   }
 }
 
@@ -242,7 +286,7 @@ const date = (value: string) => new Intl.DateTimeFormat(locale.value === 'km' ? 
       <template v-else-if="tab === 'orders'"><div class="admin-table-section"><AdminOrdersTable :orders="orders" :money="money" :date="date" :editable="true" @status="updateStatus" /></div></template>
 
       <template v-else-if="tab === 'customers'">
-        <div class="admin-table-section"><table class="orders-table customer-admin-table"><thead><tr><th>{{ t('admin.customer') }}</th><th>{{ t('checkout.email') }}</th><th>{{ t('checkout.phone') }}</th><th>{{ t('admin.orders') }}</th></tr></thead><tbody><tr v-for="customer in customers" :key="customer.id"><td>{{ customer.name }}</td><td>{{ customer.email }}</td><td>{{ customer.phone || '—' }}</td><td>{{ customer._count.orders }}</td></tr></tbody></table><p v-if="!customers.length" class="muted-empty">{{ t('admin.empty') }}</p></div>
+        <div class="admin-table-section"><table class="orders-table customer-admin-table"><thead><tr><th>{{ t('admin.customer') }}</th><th>{{ t('checkout.email') }}</th><th>{{ t('checkout.phone') }}</th><th>{{ t('admin.orders') }}</th><th>Demo wallet balance</th><th></th></tr></thead><tbody><tr v-for="customer in customers" :key="customer.id"><td>{{ customer.name }}</td><td>{{ customer.email }}</td><td>{{ customer.phone || '—' }}</td><td>{{ customer._count.orders }}</td><td>{{ money(Number(customer.walletBalance)) }}</td><td><button class="button button-outline wallet-adjust-button" type="button" @click="openWallet(customer)">Adjust</button></td></tr></tbody></table><p v-if="!customers.length" class="muted-empty">{{ t('admin.empty') }}</p></div>
       </template>
 
       <template v-else-if="tab === 'categories'">
@@ -282,6 +326,35 @@ const date = (value: string) => new Intl.DateTimeFormat(locale.value === 'km' ? 
         <div class="form-grid"><label class="form-field"><span>{{ t('admin.nameEn') }}</span><input v-model.trim="categoryForm.nameEn" required /></label><label class="form-field"><span>{{ t('admin.nameKm') }}</span><input v-model.trim="categoryForm.nameKm" lang="km" required /></label><label class="form-field span-two"><span>{{ t('admin.slug') }}</span><input v-model.trim="categoryForm.slug" pattern="[a-z0-9-]+" required /></label><label class="form-field span-two"><span>{{ t('admin.categoryDescriptionEn') }}</span><textarea v-model.trim="categoryForm.descriptionEn" rows="2" /></label><label class="form-field span-two"><span>{{ t('admin.categoryDescriptionKm') }}</span><textarea v-model.trim="categoryForm.descriptionKm" rows="2" lang="km" /></label><label class="form-field span-two"><span>{{ t('admin.image') }}</span><input v-model.trim="categoryForm.imageUrl" type="url" /></label><label class="form-field span-two"><span>{{ t('admin.sortOrder') }}</span><input v-model.number="categoryForm.sortOrder" type="number" min="0" step="1" required /></label></div>
         <p v-if="error" class="form-error">{{ error }}</p><div class="modal-actions"><button class="button button-outline" type="button" @click="showCategoryForm = false">{{ t('admin.cancel') }}</button><button class="button button-dark" type="submit" :disabled="busy">{{ busy ? t('common.loading') : t('admin.save') }}</button></div>
       </form>
+    </div>
+
+    <div v-if="walletCustomer" class="modal-backdrop" @click.self="walletCustomer = null">
+      <section class="product-modal wallet-modal">
+        <div class="modal-heading">
+          <div><span class="section-kicker">DEMO WALLET</span><h2>{{ walletCustomer.name }}</h2><p>{{ walletCustomer.email }}</p></div>
+          <button type="button" class="icon-link" aria-label="Close" @click="walletCustomer = null"><X :size="19" /></button>
+        </div>
+        <div class="wallet-current-balance"><span>Available demo balance</span><strong>{{ money(Number(walletCustomer.walletBalance)) }}</strong></div>
+        <p class="wallet-demo-notice">Demo ledger only. This adjustment does not deposit, withdraw, or transfer real money.</p>
+        <form class="wallet-adjust-form" @submit.prevent="saveWalletAdjustment">
+          <label class="form-field"><span>Adjustment</span><select v-model="walletForm.direction"><option value="CREDIT">Credit balance</option><option value="DEBIT">Debit balance</option></select></label>
+          <label class="form-field"><span>Amount (USD)</span><input v-model.number="walletForm.amount" type="number" min="0.01" max="1000000" step="0.01" required /></label>
+          <label class="form-field"><span>Reason (required for audit history)</span><input v-model.trim="walletForm.note" maxlength="500" minlength="3" required /></label>
+          <p v-if="walletError" class="form-error" role="alert">{{ walletError }}</p>
+          <button class="button button-dark" type="submit" :disabled="walletBusy || !walletForm.amount || !walletForm.note.trim()">{{ walletBusy ? t('common.loading') : 'Save adjustment' }}</button>
+        </form>
+        <div class="wallet-admin-history">
+          <h3>Recent wallet activity</h3>
+          <p v-if="walletLoading" class="muted-empty">{{ t('common.loading') }}</p>
+          <p v-else-if="!walletError && !walletTransactions.length" class="muted-empty">No wallet activity yet.</p>
+          <div v-else-if="walletTransactions.length" class="orders-table-wrap">
+            <table class="orders-table">
+              <thead><tr><th>Activity</th><th>Amount</th><th>Balance after</th><th>Reason / order</th><th>By</th></tr></thead>
+              <tbody><tr v-for="entry in walletTransactions" :key="entry.id"><td>{{ entry.type.replace(/_/g, ' ') }}<small>{{ date(entry.createdAt) }}</small></td><td>{{ money(Number(entry.amount)) }}</td><td>{{ money(Number(entry.balanceAfter)) }}</td><td>{{ entry.note || entry.order?.orderNumber || '—' }}</td><td>{{ entry.actor?.name || 'Customer' }}</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </div>
   </section>
 </template>

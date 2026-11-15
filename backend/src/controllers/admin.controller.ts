@@ -48,8 +48,80 @@ export async function deleteProduct(req: Request, res: Response) {
 }
 
 export async function adminCustomers(_req: Request, res: Response) {
-  const items = await prisma.user.findMany({ where: { role: 'CUSTOMER' }, select: { id: true, name: true, email: true, phone: true, createdAt: true, _count: { select: { orders: true } } }, orderBy: { createdAt: 'desc' }, take: 100 });
+  const items = await prisma.user.findMany({ where: { role: 'CUSTOMER' }, select: { id: true, name: true, email: true, phone: true, walletBalance: true, createdAt: true, _count: { select: { orders: true } } }, orderBy: { createdAt: 'desc' }, take: 100 });
   res.json(success(items));
+}
+
+export async function adminCustomerWallet(req: Request, res: Response) {
+  const customer = await prisma.user.findFirst({
+    where: { id: req.params.id, role: 'CUSTOMER' },
+    select: {
+      walletBalance: true,
+      walletTransactions: {
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: {
+          id: true,
+          type: true,
+          amount: true,
+          balanceAfter: true,
+          note: true,
+          createdAt: true,
+          actor: { select: { name: true, email: true } },
+          order: { select: { orderNumber: true } }
+        }
+      }
+    }
+  });
+  if (!customer) throw new HttpError(404, 'Customer not found');
+  res.json(success({ balance: customer.walletBalance, transactions: customer.walletTransactions }));
+}
+
+export async function adjustCustomerWallet(req: Request, res: Response) {
+  const { direction, note } = req.body as { direction: 'CREDIT' | 'DEBIT'; note: string };
+  const amount = new Prisma.Decimal(req.body.amount);
+  const result = await prisma.$transaction(async (tx) => {
+    const customer = await tx.user.findFirst({
+      where: { id: req.params.id, role: 'CUSTOMER' },
+      select: { id: true, walletBalance: true }
+    });
+    if (!customer) throw new HttpError(404, 'Customer not found');
+    const maxBalance = new Prisma.Decimal('9999999999.99');
+    if (direction === 'CREDIT' && customer.walletBalance.add(amount).greaterThan(maxBalance)) {
+      throw new HttpError(409, 'Demo wallet balance limit exceeded');
+    }
+
+    const updated = await tx.user.updateMany({
+      where: {
+        id: customer.id,
+        role: 'CUSTOMER',
+        walletBalance: direction === 'DEBIT'
+          ? { gte: amount }
+          : { lte: maxBalance.sub(amount) }
+      },
+      data: { walletBalance: direction === 'CREDIT' ? { increment: amount } : { decrement: amount } }
+    });
+    if (updated.count !== 1) {
+      throw new HttpError(409, direction === 'DEBIT' ? 'Customer has insufficient demo wallet balance' : 'Demo wallet balance limit exceeded');
+    }
+
+    const updatedCustomer = await tx.user.findUniqueOrThrow({
+      where: { id: customer.id },
+      select: { walletBalance: true }
+    });
+    await tx.walletTransaction.create({
+      data: {
+        userId: customer.id,
+        actorUserId: req.auth!.userId,
+        type: direction === 'CREDIT' ? 'ADMIN_CREDIT' : 'ADMIN_DEBIT',
+        amount,
+        balanceAfter: updatedCustomer.walletBalance,
+        note
+      }
+    });
+    return updatedCustomer;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  res.json(success(result));
 }
 
 export async function createCategory(req: Request, res: Response) {

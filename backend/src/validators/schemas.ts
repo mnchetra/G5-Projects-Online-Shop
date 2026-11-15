@@ -20,7 +20,7 @@ export const checkoutSchema = z.object({
   city: z.string().trim().min(2).max(100),
   province: z.string().trim().min(2).max(100),
   notes: z.string().trim().max(500).optional(),
-  paymentMethod: z.enum(['CASH_ON_DELIVERY', 'ABA_KHQR', 'BAKONG_ESCROW']).default('CASH_ON_DELIVERY'),
+  paymentMethod: z.enum(['CASH_ON_DELIVERY', 'ABA_KHQR', 'BAKONG_ESCROW', 'DEMO_WALLET']).default('CASH_ON_DELIVERY'),
   items: z.array(z.object({ productId: z.string().min(1), quantity: z.number().int().min(1).max(50) })).min(1).max(50)
 });
 
@@ -29,9 +29,13 @@ export const khqrOrderAccessSchema = z.object({
 });
 
 export const escrowActionSchema = z.object({
-  customerPhone: z.string().trim().min(6).max(30).optional(),
-  reason: z.string().trim().min(5).max(1000).optional(),
-  buyerAddress: z.string().trim().max(100).optional()
+  reason: z.string().trim().min(5).max(1000).optional()
+});
+
+export const walletAdjustmentSchema = z.object({
+  direction: z.enum(['CREDIT', 'DEBIT']),
+  amount: z.number().positive().max(1000000).refine((value) => Number(value.toFixed(2)) === value, 'Amount must have at most two decimal places'),
+  note: z.string().trim().min(3).max(500)
 });
 
 export const escrowResolveSchema = z.object({

@@ -15,8 +15,8 @@ const router = createRouter({
     { path: '/account', component: () => import('../views/AccountView.vue') },
     { path: '/escrow', component: () => import('../views/EscrowView.vue') },
     { path: '/escrow/:orderNumber', component: () => import('../views/EscrowView.vue') },
-    { path: '/admin/login', component: () => import('../views/AdminLoginView.vue'), meta: { adminLogin: true } },
-    { path: '/admin', component: () => import('../views/AdminView.vue'), meta: { admin: true } },
+    { path: '/admin/login', redirect: (to) => ({ path: '/admin', query: to.query }) },
+    { path: '/admin', component: () => import('../views/AdminEntryView.vue'), meta: { adminEntry: true } },
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ]
 });
@@ -24,11 +24,6 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
   if (!auth.checked) await auth.fetchMe();
-
-  if (to.meta.admin) {
-    if (auth.user?.role !== 'ADMIN') return { path: '/admin/login', query: { redirect: to.fullPath } };
-    return true;
-  }
 
   // If user visits /login or /register while already signed in, redirect them
   if ((to.path === '/login' || to.path === '/register') && auth.user) {

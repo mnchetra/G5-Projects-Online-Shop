@@ -32,7 +32,7 @@ async function signOut() {
   <div class="announcement">{{ t('nav.announcement') }}</div>
   <header class="site-header">
     <div class="header-inner">
-      <RouterLink to="/" class="brand" aria-label="Mekong Market home"><span class="brand-mark"><Leaf :size="18" /></span><span>{{ t('brand') }}</span></RouterLink>
+      <RouterLink to="/" class="brand" aria-label="Tinh Tinh Online"><span class="brand-mark"><Leaf :size="18" /></span><span>{{ t('brand') }}</span></RouterLink>
       <nav class="main-nav" aria-label="Main navigation">
         <RouterLink to="/shop" :class="{ active: isShop }">{{ t('nav.shop') }}</RouterLink>
         <a href="/#our-way">{{ t('nav.story') }}</a>

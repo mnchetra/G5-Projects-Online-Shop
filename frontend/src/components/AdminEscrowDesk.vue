@@ -9,15 +9,7 @@ import { api, apiErrorMessage } from '../services/api';
 type AdminEscrowRecord = {
   id: string;
   orderId: string;
-  contractAddress: string;
-  contractNetwork: string;
-  txHash?: string;
-  releaseTxHash?: string;
-  refundTxHash?: string;
   disputeReason?: string;
-  buyerAddress: string;
-  sellerAddress: string;
-  arbiterAddress: string;
   amount: number | string;
   bakongMd5?: string;
   status: 'INITIATED' | 'FUNDS_LOCKED' | 'DISPATCHED' | 'RELEASED' | 'DISPUTED' | 'REFUNDED';
@@ -33,6 +25,7 @@ type AdminEscrowRecord = {
     customerName: string;
     customerPhone: string;
     total: number | string;
+    paymentMethod: string;
     status: string;
     createdAt: string;
     items: { productNameEn: string; productNameKm: string; quantity: number }[];
@@ -151,9 +144,9 @@ onMounted(loadEscrows);
   <div class="admin-escrow-desk">
     <div class="desk-header">
       <div>
-        <span class="eyebrow"><ShieldCheck :size="14" /> SMART CONTRACT PROTOCOL</span>
-        <h2>{{ isKhmer ? 'តុគ្រប់គ្រងកិច្ចសន្យាធានាប្រាក់ Bakong Escrow' : 'Bakong Smart Contract Escrow Desk' }}</h2>
-        <p>{{ isKhmer ? 'តាមដាន និងគ្រប់គ្រងការចាក់សោប្រាក់ ការផ្ញើទំនិញ និងការដោះស្រាយវិវាទលើ Smart Contract' : 'Monitor on-chain escrow locks, dispatch inspection windows, and arbitrate buyer-seller disputes.' }}</p>
+        <span class="eyebrow"><ShieldCheck :size="14" /> DATABASE DEMO</span>
+        <h2>{{ isKhmer ? 'ការគ្រប់គ្រងស្ថានភាព Escrow និងកាបូបសាកល្បង' : 'Demo Escrow Status & Wallet Desk' }}</h2>
+        <p>{{ isKhmer ? 'កត់ត្រាការកក់ប្រាក់ និងតាមដានការដឹកជញ្ជូនក្នុងមូលដ្ឋានទិន្នន័យ។ មិនមាន Smart Contract ឬការផ្ទេរប្រាក់ពិតទេ។' : 'Record order holds and delivery status in the database. No smart-contract custody or real payouts are active.' }}</p>
       </div>
       <button class="button button-outline refresh-btn" type="button" :disabled="loading" @click="loadEscrows">
         <RefreshCw :size="14" :class="{ 'spin-icon': loading }" /> Refresh
@@ -178,7 +171,7 @@ onMounted(loadEscrows);
       <div class="stat-card highlight-locked">
         <span class="stat-title"><Lock :size="14" /> Funds Locked</span>
         <strong class="stat-num">{{ stats.fundsLocked }}</strong>
-        <span class="stat-sub">Held in smart contract</span>
+        <span class="stat-sub">Marked held in database</span>
       </div>
       <div class="stat-card highlight-dispatched">
         <span class="stat-title"><Clock :size="14" /> In Inspection</span>
@@ -191,9 +184,9 @@ onMounted(loadEscrows);
         <span class="stat-sub">Action required</span>
       </div>
       <div class="stat-card highlight-released">
-        <span class="stat-title"><Unlock :size="14" /> Released / Payout</span>
+        <span class="stat-title"><Unlock :size="14" /> Released status</span>
         <strong class="stat-num">{{ stats.released }}</strong>
-        <span class="stat-sub">Settled to sellers</span>
+        <span class="stat-sub">Marked released; no payout</span>
       </div>
     </div>
 
@@ -234,7 +227,7 @@ onMounted(loadEscrows);
             <th>Amount</th>
             <th>Escrow Status</th>
             <th>Bakong MD5</th>
-            <th>On-Chain Tx Hash</th>
+            <th>Payment Method</th>
             <th>Created</th>
             <th>Actions</th>
           </tr>
@@ -262,8 +255,7 @@ onMounted(loadEscrows);
               <span v-else class="text-muted">—</span>
             </td>
             <td>
-              <code v-if="e.txHash" class="code-sm">{{ e.txHash.slice(0, 10) }}...</code>
-              <span v-else class="text-muted">—</span>
+              <span>{{ e.order.paymentMethod.replace(/_/g, ' ') }}</span>
             </td>
             <td>
               <span class="date-sm">{{ new Date(e.createdAt).toLocaleDateString() }}</span>
@@ -290,7 +282,7 @@ onMounted(loadEscrows);
                   :to="'/escrow/' + e.order.orderNumber"
                   target="_blank"
                   class="btn-action btn-view"
-                  title="Open live on-chain escrow tracker"
+                  title="Open demo escrow status tracker"
                 >
                   <ExternalLink :size="12" /> Vault
                 </RouterLink>

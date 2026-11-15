@@ -17,3 +17,27 @@ export async function updateProfile(req: Request, res: Response) {
   if (!item) throw new HttpError(404, 'Account not found');
   res.json(success({ user: item }));
 }
+
+export async function wallet(req: Request, res: Response) {
+  const user = await prisma.user.findUnique({
+    where: { id: req.auth!.userId },
+    select: {
+      walletBalance: true,
+      walletTransactions: {
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: {
+          id: true,
+          type: true,
+          amount: true,
+          balanceAfter: true,
+          note: true,
+          createdAt: true,
+          order: { select: { orderNumber: true } }
+        }
+      }
+    }
+  });
+  if (!user) throw new HttpError(404, 'Account not found');
+  res.json(success({ balance: user.walletBalance, transactions: user.walletTransactions }));
+}

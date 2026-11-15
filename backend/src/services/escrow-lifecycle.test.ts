@@ -10,10 +10,13 @@ import {
   resolveEscrowDispute
 } from './escrow.service.js';
 
-describe('End-to-End Bakong Escrow Flow', () => {
-  it('handles complete escrow lifecycle from checkout to on-chain release', async () => {
+describe('Database-tracked escrow lifecycle', () => {
+  it('records checkout, dispatch, delivery confirmation, and release status', async () => {
     const product = await prisma.product.findFirst({ where: { isActive: true } });
     expect(product).toBeDefined();
+    const buyer = await prisma.user.create({
+      data: { email: `escrow-test-${Date.now()}@example.com`, name: 'Sophea Escrow Test', passwordHash: 'test-only' }
+    });
 
     // 1. Checkout with BAKONG_ESCROW
     const order = await checkout({
@@ -25,7 +28,7 @@ describe('End-to-End Bakong Escrow Flow', () => {
       province: 'Phnom Penh',
       paymentMethod: 'BAKONG_ESCROW',
       items: [{ productId: product!.id, quantity: 1 }]
-    });
+    }, buyer.id);
 
     expect(order.orderNumber).toBeDefined();
     expect(order.paymentMethod).toBe('BAKONG_ESCROW');
@@ -46,19 +49,23 @@ describe('End-to-End Bakong Escrow Flow', () => {
     expect(dispatched.status).toBe('DISPATCHED');
     expect(dispatched.autoReleaseAt).toBeDefined();
 
-    // 4. Buyer confirms receipt and triggers smart contract release
-    const releaseResult = await releaseEscrowFunds(order.orderNumber, '098765432');
+    // 4. The authenticated buyer confirms receipt.
+    const releaseResult = await releaseEscrowFunds(order.orderNumber, buyer.id);
     expect(releaseResult.escrow.status).toBe('RELEASED');
-    expect(releaseResult.releaseTxHash).toMatch(/^0x[a-f0-9]{64}$/i);
+    expect(releaseResult.releaseTxHash).toBeNull();
 
-    // 5. Details endpoint returns complete state and contract info
-    const details = await getEscrowDetails(order.orderNumber);
+    // 5. Details are visible to the owning buyer.
+    const details = await getEscrowDetails(order.orderNumber, buyer.id);
     expect(details.escrow?.status).toBe('RELEASED');
-    expect(details.contract.contractName).toBe('BakongEscrow');
+    expect(details.paymentMethod).toBe('BAKONG_ESCROW');
   });
 
   it('handles dispute and arbitration flow', async () => {
     const product = await prisma.product.findFirst({ where: { isActive: true } });
+    expect(product).toBeDefined();
+    const buyer = await prisma.user.create({
+      data: { email: `dispute-test-${Date.now()}@example.com`, name: 'Dara Dispute Test', passwordHash: 'test-only' }
+    });
 
     // Checkout
     const order = await checkout({
@@ -69,7 +76,7 @@ describe('End-to-End Bakong Escrow Flow', () => {
       province: 'Phnom Penh',
       paymentMethod: 'BAKONG_ESCROW',
       items: [{ productId: product!.id, quantity: 1 }]
-    });
+    }, buyer.id);
 
     // Lock funds
     await lockEscrowFunds({
@@ -81,13 +88,13 @@ describe('End-to-End Bakong Escrow Flow', () => {
     await markEscrowDispatched(order.orderNumber, 3);
 
     // Buyer files dispute
-    const disputed = await disputeEscrow(order.orderNumber, 'Item arrived damaged during transport', '011223344');
+    const disputed = await disputeEscrow(order.orderNumber, 'Item arrived damaged during transport', buyer.id);
     expect(disputed.status).toBe('DISPUTED');
     expect(disputed.disputeReason).toContain('Item arrived damaged');
 
     // Arbiter resolves dispute with refund to buyer
-    const resolution = await resolveEscrowDispute(order.orderNumber, 'REFUND_TO_BUYER', 'Damaged in transit verified. Refund granted.');
+    const resolution = await resolveEscrowDispute(order.orderNumber, 'REFUND_TO_BUYER', 'Damaged in transit verified. Refund granted.', buyer.id);
     expect(resolution.escrow.status).toBe('REFUNDED');
-    expect(resolution.escrow.refundTxHash).toMatch(/^0x[a-f0-9]{64}$/i);
+    expect(resolution.escrow.refundTxHash).toBeNull();
   });
 });

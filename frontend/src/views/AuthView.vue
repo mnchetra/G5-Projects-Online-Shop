@@ -185,7 +185,7 @@ const isLoginValid = computed(() => {
           <div class="hero-quote-card">
             <div class="quote-content">
               <p class="quote-text">“{{ t('auth.quote') }}”</p>
-              <span class="quote-signoff">Mekong Market · Cambodia</span>
+              <span class="quote-signoff">Tinh Tinh Online · Cambodia</span>
             </div>
           </div>
         </section>

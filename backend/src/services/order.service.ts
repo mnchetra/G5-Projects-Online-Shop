@@ -1,4 +1,4 @@
-import { PaymentMethod, Prisma } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus, Prisma, WalletTransactionType } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { HttpError } from '../utils/http.js';
 
@@ -34,26 +34,75 @@ export async function checkout(input: CheckoutInput, userId?: string) {
     const total = subtotal.add(deliveryFee);
     const orderNumber = `MM-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
     const isEscrow = input.paymentMethod === PaymentMethod.BAKONG_ESCROW;
-    return tx.order.create({
+    const isDemoWallet = input.paymentMethod === PaymentMethod.DEMO_WALLET;
+    let walletBalanceAfter: Prisma.Decimal | null = null;
+
+    if (isDemoWallet) {
+      if (!userId) throw new HttpError(401, 'Sign in to use the demo wallet');
+      const debit = await tx.user.updateMany({
+        where: { id: userId, role: 'CUSTOMER', walletBalance: { gte: total } },
+        data: { walletBalance: { decrement: total } }
+      });
+      if (debit.count !== 1) throw new HttpError(409, 'Insufficient demo wallet balance');
+      const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { walletBalance: true } });
+      walletBalanceAfter = user.walletBalance;
+    }
+
+    const order = await tx.order.create({
       data: {
         orderNumber, userId, customerName: input.customerName, customerEmail: input.customerEmail || null,
         customerPhone: input.customerPhone, addressLine: input.addressLine, city: input.city, province: input.province,
         notes: input.notes, subtotal, deliveryFee, total, paymentMethod: input.paymentMethod,
+        ...(isDemoWallet ? { status: OrderStatus.CONFIRMED } : {}),
         items: { create: orderItems },
-        payment: { create: { method: input.paymentMethod, amount: total } },
-        ...(isEscrow ? {
+        payment: {
+          create: {
+            method: input.paymentMethod,
+            amount: total,
+            ...(isDemoWallet ? { status: PaymentStatus.PAID, provider: 'Demo wallet ledger' } : {})
+          }
+        },
+        ...(isEscrow || isDemoWallet ? {
           escrow: {
             create: {
-              contractAddress: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
-              contractNetwork: 'Bakong EVM L2 Testnet',
+              ...(isDemoWallet ? {
+                contractAddress: 'DEMO_WALLET_LEDGER',
+                contractNetwork: 'Database demo only - no real funds',
+                buyerAddress: 'DEMO_CUSTOMER_WALLET',
+                sellerAddress: 'DEMO_STORE_LEDGER',
+                arbiterAddress: 'DEMO_ADMIN_REVIEW'
+              } : {
+                contractAddress: 'DATABASE_STATUS_ONLY',
+                contractNetwork: 'No live contract; database status only',
+                buyerAddress: 'NOT_ON_CHAIN',
+                sellerAddress: 'NOT_ON_CHAIN',
+                arbiterAddress: 'NOT_ON_CHAIN'
+              }),
               amount: total,
-              status: 'INITIATED',
-              inspectionDays: 3
+              status: isDemoWallet ? 'FUNDS_LOCKED' : 'INITIATED',
+              inspectionDays: 3,
+              ...(isDemoWallet ? { lockedAt: new Date() } : {})
             }
           }
         } : {})
       },
       include: { items: true, payment: true, escrow: true }
     });
+
+    if (isDemoWallet && userId && walletBalanceAfter !== null) {
+      await tx.walletTransaction.create({
+        data: {
+          userId,
+          actorUserId: userId,
+          orderId: order.id,
+          type: WalletTransactionType.ORDER_HOLD,
+          amount: total,
+          balanceAfter: walletBalanceAfter,
+          note: `Demo wallet hold for order ${orderNumber}`
+        }
+      });
+    }
+
+    return order;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

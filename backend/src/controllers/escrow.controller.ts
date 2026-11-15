@@ -11,25 +11,23 @@ import {
 import { success } from '../utils/http.js';
 
 export async function getEscrowPublic(req: Request, res: Response) {
-  const details = await getEscrowDetails(req.params.orderNumber);
+  const details = await getEscrowDetails(req.params.orderNumber, req.auth!.userId, req.auth!.role);
   res.json(success(details));
 }
 
 export async function handleReleaseEscrow(req: Request, res: Response) {
-  const customerPhone = typeof req.body.customerPhone === 'string' ? req.body.customerPhone : undefined;
-  const result = await releaseEscrowFunds(req.params.orderNumber, customerPhone);
+  const result = await releaseEscrowFunds(req.params.orderNumber, req.auth!.userId);
   res.json(success({
-    message: 'Escrow funds successfully released to seller via smart contract',
+    message: 'Delivery confirmed; the demo escrow status was updated. No real payout was made.',
     ...result
   }));
 }
 
 export async function handleDisputeEscrow(req: Request, res: Response) {
   const reason = String(req.body.reason || '').trim();
-  const customerPhone = typeof req.body.customerPhone === 'string' ? req.body.customerPhone : undefined;
-  const escrow = await disputeEscrow(req.params.orderNumber, reason, customerPhone);
+  const escrow = await disputeEscrow(req.params.orderNumber, reason, req.auth!.userId);
   res.json(success({
-    message: 'Dispute has been registered with the escrow arbiter',
+    message: 'Dispute recorded for administrator review in the demo database.',
     escrow
   }));
 }
@@ -48,7 +46,7 @@ export async function handleAdminDispatchEscrow(req: Request, res: Response) {
   const days = Number(req.body.inspectionDays) || 3;
   const escrow = await markEscrowDispatched(req.params.orderNumber, days);
   res.json(success({
-    message: 'Order marked as dispatched. Inspection countdown active on smart contract.',
+    message: 'Order marked as dispatched. The inspection countdown is tracked in the database.',
     escrow
   }));
 }
@@ -56,9 +54,9 @@ export async function handleAdminDispatchEscrow(req: Request, res: Response) {
 export async function handleAdminResolveDispute(req: Request, res: Response) {
   const resolution = req.body.resolution as 'RELEASE_TO_SELLER' | 'REFUND_TO_BUYER';
   const notes = String(req.body.notes || 'Arbitrated by store administrator');
-  const result = await resolveEscrowDispute(req.params.orderNumber, resolution, notes);
+  const result = await resolveEscrowDispute(req.params.orderNumber, resolution, notes, req.auth!.userId);
   res.json(success({
-    message: `Dispute resolved: ${resolution === 'RELEASE_TO_SELLER' ? 'Funds released to seller' : 'Refund granted to buyer'}`,
+    message: `Dispute resolved in the demo ledger: ${resolution === 'RELEASE_TO_SELLER' ? 'hold released to store' : 'customer wallet refunded'}. No real funds moved.`,
     ...result
   }));
 }

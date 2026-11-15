@@ -13,7 +13,7 @@ export async function createOrder(req: Request, res: Response) {
     assertBakongConfigured();
   }
   const order = await checkout(req.body, req.auth?.userId);
-  if (order.paymentMethod === 'CASH_ON_DELIVERY') {
+  if (order.paymentMethod === 'CASH_ON_DELIVERY' || order.paymentMethod === 'DEMO_WALLET') {
     res.status(201).json(success({ order, khqr: null }));
     return;
   }

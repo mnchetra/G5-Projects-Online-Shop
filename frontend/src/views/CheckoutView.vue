@@ -14,11 +14,13 @@ const auth = useAuthStore();
 const busy = ref(false);
 const error = ref('');
 const orderNumber = ref('');
-const paymentMethod = ref<'CASH_ON_DELIVERY' | 'ABA_KHQR' | 'BAKONG_ESCROW'>('BAKONG_ESCROW');
-const orderPaymentMethod = ref<'CASH_ON_DELIVERY' | 'ABA_KHQR' | 'BAKONG_ESCROW'>('BAKONG_ESCROW');
+const paymentMethod = ref<'CASH_ON_DELIVERY' | 'ABA_KHQR' | 'BAKONG_ESCROW' | 'DEMO_WALLET'>('DEMO_WALLET');
+const orderPaymentMethod = ref<'CASH_ON_DELIVERY' | 'ABA_KHQR' | 'BAKONG_ESCROW' | 'DEMO_WALLET'>('DEMO_WALLET');
 const paymentQrImage = ref<string | null>(null);
 const paymentError = ref('');
 const paymentStatus = ref<'PENDING' | 'PAID'>('PENDING');
+const walletBalance = ref<number | null>(null);
+const walletError = ref('');
 const retryingQr = ref(false);
 const paymentTotal = ref(0);
 let paymentPollTimer: number | undefined;
@@ -43,12 +45,32 @@ function syncUserToForm() {
   }
 }
 
-watch(() => auth.user, () => syncUserToForm(), { immediate: true });
+watch(() => auth.user, () => {
+  syncUserToForm();
+  void loadWalletBalance();
+}, { immediate: true });
 
 onMounted(async () => {
   if (!auth.checked) await auth.fetchMe();
   syncUserToForm();
+  await loadWalletBalance();
 });
+
+async function loadWalletBalance() {
+  if (!auth.user) {
+    walletBalance.value = null;
+    walletError.value = '';
+    return;
+  }
+  walletError.value = '';
+  try {
+    const { data } = await api.get('/users/wallet');
+    walletBalance.value = Number(data.data.balance);
+  } catch (exception) {
+    walletBalance.value = null;
+    walletError.value = apiErrorMessage(exception);
+  }
+}
 
 async function handleCheckoutLogin() {
   authBusy.value = true;
@@ -107,6 +129,7 @@ async function handleLogout() {
   form.customerName = '';
   form.customerEmail = '';
   form.customerPhone = '';
+  walletBalance.value = null;
 }
 
 const delivery = computed(() => cart.subtotal >= 50 ? 0 : 2.5);
@@ -182,7 +205,8 @@ async function placeOrder() {
     orderPaymentMethod.value = order.paymentMethod ?? paymentMethod.value;
     paymentError.value = data.data.paymentError || '';
     paymentQrImage.value = resolveKhqrImageSource(data.data.khqr?.qrImage);
-    paymentStatus.value = 'PENDING';
+    paymentStatus.value = orderPaymentMethod.value === 'DEMO_WALLET' && order.payment?.status === 'PAID' ? 'PAID' : 'PENDING';
+    if (orderPaymentMethod.value === 'DEMO_WALLET') await loadWalletBalance();
     if (orderPaymentMethod.value === 'ABA_KHQR' || orderPaymentMethod.value === 'BAKONG_ESCROW') {
       if (paymentQrImage.value) startPaymentPolling();
       else if (!paymentError.value) paymentError.value = t('checkout.qrCreateFailed');
@@ -206,15 +230,23 @@ async function placeOrder() {
       <h1>{{ t('checkout.success') }}</h1>
       <p>{{ t('checkout.orderNumber') }}: <strong>{{ orderNumber }}</strong></p>
 
-      <div v-if="orderPaymentMethod === 'BAKONG_ESCROW' || orderPaymentMethod === 'ABA_KHQR'" class="payment-qr-box">
+      <div v-if="orderPaymentMethod === 'DEMO_WALLET'" class="payment-qr-box demo-wallet-box">
+        <span class="escrow-choice-badge">DEMO WALLET</span>
+        <p><strong>{{ money(paymentTotal) }}</strong> was deducted from your demo balance and marked as held for this order.</p>
+        <p>This is a database demonstration only. No real money is held or transferred. Confirm delivery after the goods arrive to mark the demo hold as released.</p>
+        <RouterLink :to="'/escrow/' + encodeURIComponent(orderNumber)" class="button button-dark escrow-link-btn">
+          <ShieldCheck :size="15" /> View delivery confirmation
+        </RouterLink>
+      </div>
+      <div v-else-if="orderPaymentMethod === 'BAKONG_ESCROW' || orderPaymentMethod === 'ABA_KHQR'" class="payment-qr-box">
         <div v-if="orderPaymentMethod === 'BAKONG_ESCROW'" class="escrow-status-header">
-          <span class="escrow-badge"><ShieldCheck :size="14" /> {{ t('checkout.escrowBadge') }}</span>
+          <span class="escrow-badge"><ShieldCheck :size="14" /> {{ t('demoWallet.badge') }}</span>
           <p class="escrow-desc">
             <template v-if="paymentStatus === 'PAID'">
-              <Lock :size="13" /> Funds verified and locked in Smart Contract escrow vault.
+              <Lock :size="13" /> Payment status confirmed; the escrow status is tracked in this app's database only.
             </template>
             <template v-else>
-              Scan below using Bakong or any Cambodian bank app. Funds will be held securely in Smart Contract until you confirm delivery.
+              Scan below using Bakong or a supported Cambodian bank app. {{ t('demoWallet.bakongHint') }}
             </template>
           </p>
         </div>
@@ -227,18 +259,18 @@ async function placeOrder() {
         <p>{{ t('checkout.totalDue') }}: <strong>{{ money(paymentTotal) }}</strong></p>
         <small>{{ t('checkout.qrHint', { orderNumber, amount: money(paymentTotal) }) }}</small>
         <span class="payment-status-badge" :class="paymentStatus.toLowerCase()">
-          <i></i>{{ paymentStatus === 'PAID' ? (orderPaymentMethod === 'BAKONG_ESCROW' ? 'Escrow Funds Locked in Smart Contract' : t('checkout.paymentVerified')) : t('checkout.paymentPending') }}
+          <i></i>{{ paymentStatus === 'PAID' ? (orderPaymentMethod === 'BAKONG_ESCROW' ? 'Payment confirmed; database status updated' : t('checkout.paymentVerified')) : t('checkout.paymentPending') }}
         </span>
         <div v-if="orderPaymentMethod === 'BAKONG_ESCROW'" class="escrow-action-row">
           <RouterLink :to="'/escrow/' + encodeURIComponent(orderNumber)" class="button button-dark escrow-link-btn">
-            <ShieldCheck :size="15" /> {{ t('escrow.viewContract') }}
+            <ShieldCheck :size="15" /> {{ t('demoWallet.viewTracker') }}
           </RouterLink>
         </div>
       </div>
       <p v-else>{{ t('checkout.codHint') }}</p>
       <div class="success-actions">
-        <RouterLink v-if="orderPaymentMethod === 'BAKONG_ESCROW'" :to="'/escrow/' + encodeURIComponent(orderNumber)" class="button button-outline">
-          <ExternalLink :size="14" /> Open Escrow Vault Tracker
+        <RouterLink v-if="orderPaymentMethod === 'BAKONG_ESCROW' || orderPaymentMethod === 'DEMO_WALLET'" :to="'/escrow/' + encodeURIComponent(orderNumber)" class="button button-outline">
+          <ExternalLink :size="14" /> Open demo order tracker
         </RouterLink>
         <RouterLink to="/shop" class="button button-dark">{{ t('cart.keepShopping') }}</RouterLink>
       </div>
@@ -396,12 +428,22 @@ async function placeOrder() {
 
         <fieldset class="payment-choice">
           <legend>{{ t('checkout.payment') }}</legend>
+          <label class="escrow-choice" :class="{ active: paymentMethod === 'DEMO_WALLET' }">
+            <input v-model="paymentMethod" type="radio" name="payment" value="DEMO_WALLET" />
+            <span>
+              <span class="escrow-choice-badge">{{ t('demoWallet.badge') }}</span>
+              <strong>{{ t('demoWallet.paymentTitle') }}</strong>
+              <small v-if="walletBalance !== null">{{ t('demoWallet.available', { amount: money(walletBalance) }) }}</small>
+              <small v-else-if="walletError">{{ walletError }}</small>
+              <small v-else>{{ t('demoWallet.loadingBalance') }}</small>
+            </span>
+          </label>
           <label class="escrow-choice" :class="{ active: paymentMethod === 'BAKONG_ESCROW' }">
             <input v-model="paymentMethod" type="radio" name="payment" value="BAKONG_ESCROW" />
             <span>
-              <span class="escrow-choice-badge"><ShieldCheck :size="13" /> {{ t('checkout.escrowBadge') }}</span>
-              <strong>{{ t('checkout.escrow') }}</strong>
-              <small>{{ t('checkout.escrowHint') }}</small>
+              <span class="escrow-choice-badge"><ShieldCheck :size="13" /> {{ t('demoWallet.badge') }}</span>
+              <strong>{{ t('demoWallet.bakongTitle') }}</strong>
+              <small>{{ t('demoWallet.bakongHint') }}</small>
             </span>
           </label>
           <label><input v-model="paymentMethod" type="radio" name="payment" value="ABA_KHQR" /><span><strong>{{ t('checkout.aba') }}</strong><small>{{ t('checkout.abaHint') }}</small></span></label>
@@ -410,7 +452,8 @@ async function placeOrder() {
 
         <p v-if="error" class="form-error" role="alert">{{ error }}</p>
 
-        <button class="button button-dark checkout-submit" type="submit" :disabled="busy">
+        <p v-if="paymentMethod === 'DEMO_WALLET' && walletBalance !== null && walletBalance < total" class="form-error" role="alert">{{ t('demoWallet.insufficient') }}</p>
+        <button class="button button-dark checkout-submit" type="submit" :disabled="busy || (paymentMethod === 'DEMO_WALLET' && (walletBalance === null || walletBalance < total))">
           {{ busy ? t('checkout.placing') : t('checkout.place') }}
         </button>
       </form>

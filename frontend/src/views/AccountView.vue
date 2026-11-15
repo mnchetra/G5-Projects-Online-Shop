@@ -14,6 +14,15 @@ type CustomerOrder = {
   paymentMethod?: string;
   escrow?: { status: string } | null;
 };
+type WalletTransaction = {
+  id: string;
+  type: string;
+  amount: number | string;
+  balanceAfter: number | string;
+  note?: string | null;
+  createdAt: string;
+  order?: { orderNumber: string } | null;
+};
 const { t, locale } = useI18n();
 const auth = useAuthStore();
 const route = useRoute();
@@ -23,13 +32,17 @@ const loading = ref(false);
 const error = ref('');
 const success = ref('');
 const orders = ref<CustomerOrder[]>([]);
+const walletBalance = ref<number | null>(null);
+const walletTransactions = ref<WalletTransaction[]>([]);
+const walletLoading = ref(false);
+const walletError = ref('');
 const form = reactive({ name: '', email: '', phone: '', password: '' });
 
 onMounted(async () => {
   if (!auth.checked) await auth.fetchMe();
   if (auth.user) {
     form.name = auth.user.name; form.email = auth.user.email; form.phone = auth.user.phone || '';
-    await loadOrders();
+    await Promise.all([loadOrders(), loadWallet()]);
   } else {
     await router.replace({ path: '/login', query: { redirect: '/account' } });
   }
@@ -59,13 +72,29 @@ async function submit() {
       return;
     }
 
-    await loadOrders();
+    await Promise.all([loadOrders(), loadWallet()]);
   } catch (exception) { error.value = apiErrorMessage(exception) || t('account.failed'); }
   finally { loading.value = false; }
 }
 
 async function loadOrders() {
   try { orders.value = (await api.get('/orders')).data.data; } catch { orders.value = []; }
+}
+
+async function loadWallet() {
+  walletLoading.value = true;
+  walletError.value = '';
+  try {
+    const { data } = await api.get('/users/wallet');
+    walletBalance.value = Number(data.data.balance);
+    walletTransactions.value = data.data.transactions;
+  } catch (exception) {
+    walletBalance.value = null;
+    walletError.value = apiErrorMessage(exception);
+    walletTransactions.value = [];
+  } finally {
+    walletLoading.value = false;
+  }
 }
 
 async function saveProfile() {
@@ -116,13 +145,37 @@ const money = (value: number) => new Intl.NumberFormat(locale.value === 'km' ? '
     <div v-else class="account-dashboard">
       <div class="account-title-row"><div><span class="section-kicker">YOUR MARKET ACCOUNT</span><h1>{{ t('account.title') }}</h1><p>{{ auth.user.name }} · {{ auth.user.email }}</p></div><button class="button button-outline" type="button" @click="auth.logout">{{ t('account.signOut') }}</button></div>
       <p v-if="$route.query.admin === 'required'" class="form-error">{{ t('admin.access') }}</p>
+      <section class="wallet-panel">
+        <div class="wallet-heading"><div><span class="section-kicker">DEMO WALLET</span><h2>Available balance</h2></div><strong>{{ walletBalance === null ? '—' : money(walletBalance) }}</strong></div>
+        <p>Demo balance only — no real money is held or transferred. Contact the store administrator to adjust this balance.</p>
+        <p v-if="walletError" class="form-error" role="alert">{{ walletError }}</p>
+        <div class="wallet-history">
+          <h3>Wallet activity</h3>
+          <p v-if="walletLoading" class="muted-empty">{{ t('common.loading') }}</p>
+          <p v-else-if="!walletError && !walletTransactions.length" class="muted-empty">No wallet activity yet.</p>
+          <div v-else-if="walletTransactions.length" class="orders-table-wrap">
+            <table class="orders-table">
+              <thead><tr><th>Activity</th><th>Date</th><th>Order</th><th>Amount</th><th>Balance after</th></tr></thead>
+              <tbody>
+                <tr v-for="entry in walletTransactions" :key="entry.id">
+                  <td>{{ entry.type.replace(/_/g, ' ') }}<small v-if="entry.note" class="wallet-note">{{ entry.note }}</small></td>
+                  <td>{{ date(entry.createdAt) }}</td>
+                  <td>{{ entry.order?.orderNumber || '—' }}</td>
+                  <td>{{ money(Number(entry.amount)) }}</td>
+                  <td>{{ money(Number(entry.balanceAfter)) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
       <div class="account-content">
         <section class="profile-panel"><h2>{{ t('account.profile') }}</h2><form @submit.prevent="saveProfile"><label class="form-field"><span>{{ t('account.name') }}</span><input v-model.trim="form.name" required minlength="2" /></label><label class="form-field"><span>{{ t('checkout.phone') }}</span><input v-model.trim="form.phone" type="tel" /></label><button class="button button-dark" type="submit">{{ t('account.save') }}</button></form></section>
         <section class="orders-panel">
           <div class="section-heading compact-heading"><h2>{{ t('account.orders') }}</h2></div>
           <div v-if="orders.length" class="orders-table-wrap">
             <table class="orders-table">
-              <thead><tr><th>{{ t('account.order') }}</th><th>{{ t('account.date') }}</th><th>{{ t('account.status') }}</th><th>Escrow Vault</th><th>{{ t('account.amount') }}</th></tr></thead>
+              <thead><tr><th>{{ t('account.order') }}</th><th>{{ t('account.date') }}</th><th>{{ t('account.status') }}</th><th>Payment hold</th><th>{{ t('account.amount') }}</th></tr></thead>
               <tbody>
                 <tr v-for="order in orders" :key="order.orderNumber">
                   <td>{{ order.orderNumber }}</td><td>{{ date(order.createdAt) }}</td><td><span class="status-tag" :class="`status-${order.status.toLowerCase()}`">{{ t(`status.${order.status}`) }}</span></td><td><RouterLink v-if="order.escrow || order.paymentMethod === 'BAKONG_ESCROW'" :to="'/escrow/' + order.orderNumber" class="escrow-cell-link"><ShieldCheck :size="13" /> {{ t(`status.${order.escrow?.status || 'INITIATED'}`) }}</RouterLink><span v-else class="text-muted">—</span></td><td>{{ money(Number(order.total)) }}</td>
@@ -159,6 +212,43 @@ const money = (value: number) => new Intl.NumberFormat(locale.value === 'km' ? '
 .text-muted {
   color: #9baaa0;
   font-size: 12px;
+}
+.wallet-panel {
+  margin: 24px 0;
+  padding: 22px;
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  background: #fff;
+}
+.wallet-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.wallet-heading h2 {
+  margin: 5px 0 0;
+}
+.wallet-heading > strong {
+  color: #216742;
+  font-size: 24px;
+}
+.wallet-panel > p {
+  color: #68736c;
+  font-size: 13px;
+}
+.wallet-history {
+  margin-top: 20px;
+}
+.wallet-history h3 {
+  margin-bottom: 12px;
+}
+.wallet-note {
+  display: block;
+  max-width: 280px;
+  margin-top: 4px;
+  color: #7a847d;
+  font-size: 11px;
 }
 .demo-accounts-pill {
   margin-top: 18px;

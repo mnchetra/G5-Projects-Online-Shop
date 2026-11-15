@@ -40,7 +40,8 @@ const products = [
 	{ slug: 'woven-laptop-sleeve', sku: 'COM-001', category: 'computers', nameEn: 'Woven laptop sleeve', nameKm: 'ស្រោមកុំព្យូទ័រយួរដៃត្បាញ', descriptionEn: 'A padded laptop sleeve with a simple woven exterior and secure closure.', descriptionKm: 'ស្រោមកុំព្យូទ័រមានស្រទាប់ការពារ ខាងក្រៅត្បាញសាមញ្ញ និងបិទជិតបានល្អ។', price: 31, stock: 16, featured: true, image: 'photo-1496181133206-80ce9b88a853' },
 	{ slug: 'compact-wireless-keyboard', sku: 'COM-002', category: 'computers', nameEn: 'Compact wireless keyboard', nameKm: 'ក្តារចុចឥតខ្សែទំហំតូច', descriptionEn: 'A compact wireless keyboard for a tidy desk and everyday work.', descriptionKm: 'ក្តារចុចឥតខ្សែទំហំតូច សម្រាប់តុធ្វើការរៀបរយ និងការងារប្រចាំថ្ងៃ។', price: 45, stock: 11, featured: false, image: 'photo-1587829741301-dc798b83add3' },
 	{ slug: 'usb-c-phone-charger', sku: 'PHO-001', category: 'phones', nameEn: 'USB-C phone charger', nameKm: 'ឆ្នាំងសាកទូរស័ព្ទ USB-C', descriptionEn: 'A compact fast charger with a durable cable for daily use.', descriptionKm: 'ឆ្នាំងសាកលឿនទំហំតូច ភ្ជាប់ខ្សែរឹងមាំសម្រាប់ប្រើរាល់ថ្ងៃ។', price: 22, stock: 29, featured: true, image: 'photo-1583863788434-e58a36330cf0' },
-	{ slug: 'everyday-phone-case', sku: 'PHO-002', category: 'phones', nameEn: 'Everyday phone case', nameKm: 'ស្រោមទូរស័ព្ទប្រចាំថ្ងៃ', descriptionEn: 'A slim protective case with a soft-touch finish and raised camera edge.', descriptionKm: 'ស្រោមការពារស្តើង ផ្ទៃកាន់ស្រួល និងមានគែមការពារកាមេរ៉ា។', price: 14, stock: 33, featured: false, image: 'photo-1601784551446-20c9e07cdbdb' }
+	{ slug: 'everyday-phone-case', sku: 'PHO-002', category: 'phones', nameEn: 'Everyday phone case', nameKm: 'ស្រោមទូរស័ព្ទប្រចាំថ្ងៃ', descriptionEn: 'A slim protective case with a soft-touch finish and raised camera edge.', descriptionKm: 'ស្រោមការពារស្តើង ផ្ទៃកាន់ស្រួល និងមានគែមការពារកាមេរ៉ា។', price: 14, stock: 33, featured: false, image: 'photo-1601784551446-20c9e07cdbdb' },
+	{ slug: 'iphone-17-pro-max', sku: 'PHO-003', category: 'phones', nameEn: 'iPhone 17 Pro Max', nameKm: 'ទូរស័ព្ទ iPhone 17 Pro Max', descriptionEn: 'iPhone 17 Pro Max. Contact us for current color and storage availability.', descriptionKm: 'ទូរស័ព្ទ iPhone 17 Pro Max។ សូមទាក់ទងយើងសម្រាប់ព័ត៌មានអំពីពណ៌ និងទំហំផ្ទុកដែលមាន។', price: 1011, stock: 100, featured: false, image: 'https://images.unsplash.com/photo-1592750475338-74b7b21085ab?auto=format&fit=crop&w=1200&q=85' }
 ];
 
 async function main() {
@@ -49,7 +50,7 @@ async function main() {
 		const { category: slug, image, featured, ...data } = product;
 		const productData = { ...data, isFeatured: featured };
 		const category = await prisma.category.findUniqueOrThrow({ where: { slug } });
-		const imageUrl = `https://images.unsplash.com/${image}?auto=format&fit=crop&w=1000&q=85`;
+		const imageUrl = image.startsWith('https://') ? image : `https://images.unsplash.com/${image}?auto=format&fit=crop&w=1000&q=85`;
 		const existing = await prisma.product.findUnique({ where: { slug: data.slug } });
 		if (existing) {
 			await prisma.product.update({ where: { id: existing.id }, data: { ...productData, categoryId: category.id, images: { deleteMany: {}, create: { url: imageUrl, altEn: data.nameEn, altKm: data.nameKm } } } });
