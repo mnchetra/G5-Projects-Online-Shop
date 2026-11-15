@@ -63,56 +63,133 @@ docs/api.md                           REST endpoint reference and escrow request
 
 ---
 
-## Quick Start (Run Locally)
+## 🚀 Complete Setup Guide for Fresh Clones
 
-### 1. Database Setup
-1. Start **Apache** and **MySQL** in your **XAMPP Control Panel**.
-2. Open **phpMyAdmin** (`http://localhost/phpmyadmin`) and create a database named `online_shop_db`.
-3. Check `backend/.env`:
-   ```env
-   DATABASE_URL="mysql://root:@localhost:3306/online_shop_db"
-   PORT=4000
-   FRONTEND_ORIGIN="http://localhost:5173"
-   ```
-
-### 2. Backend API Setup
-```powershell
-# Install dependencies
-npm --prefix backend install
-
-# Generate Prisma client & run migrations
-npm --prefix backend run db:generate
-npm --prefix backend run db:deploy
-
-# Seed demo categories, products, customer, and admin
-npm --prefix backend run seed
-
-# Start API server (port 4000)
-npm --prefix backend run dev
-```
-
-### 3. Frontend Storefront Setup
-In a second terminal:
-```powershell
-# Install dependencies
-npm --prefix frontend install
-
-# Start development server (port 5173)
-npm --prefix frontend run dev
-```
-
-Open **[http://localhost:5173](http://localhost:5173)** in your browser.
+Follow these steps right after cloning the repository (`git clone ...`) to get the backend, frontend, database, and demo accounts completely functional.
 
 ---
 
-## Ready-to-Use Demo Accounts
+### Step 1: Start MySQL in XAMPP & Create Database
+1. Open the **XAMPP Control Panel** (or Laragon / MariaDB) and click **Start** next to **Apache** and **MySQL**.
+2. Note your MySQL port in the XAMPP Control Panel:
+   - Typically **3306** (default) or **3307** (if port 3306 was already occupied).
+3. Open your browser and navigate to **phpMyAdmin**: [http://localhost/phpmyadmin](http://localhost/phpmyadmin).
+4. In the left sidebar, click **New**.
+5. Set the database name to: `online_shop_db`
+6. Set collation to: `utf8mb4_unicode_ci` and click **Create**.
 
-| Role | Email | Password | Access |
+---
+
+### Step 2: Configure Environment Files (`.env`)
+Environment files are git-ignored for security and must be created from their `.env.example` templates.
+
+#### 2.1 Backend `.env`
+In your terminal:
+```powershell
+# PowerShell:
+Copy-Item backend/.env.example backend/.env
+
+# Or Bash / Git Bash:
+cp backend/.env.example backend/.env
+```
+
+Open `backend/.env` in your editor and verify your `DATABASE_URL`:
+- **If your MySQL is on port 3306 (default):**
+  ```env
+  DATABASE_URL="mysql://root:@localhost:3306/online_shop_db"
+  ```
+- **If your MySQL is on port 3307:**
+  ```env
+  DATABASE_URL="mysql://root:@localhost:3307/online_shop_db"
+  ```
+> ⚠️ **Important:** The protocol MUST be `mysql://`. Do not use `postgresql://` and ensure there are no duplicate `DATABASE_URL=` strings. If your MySQL `root` user has a password, format it like `mysql://root:yourpassword@localhost:3306/online_shop_db`.
+
+#### 2.2 Frontend `.env`
+```powershell
+# PowerShell:
+Copy-Item frontend/.env.example frontend/.env
+
+# Or Bash / Git Bash:
+cp frontend/.env.example frontend/.env
+```
+Ensure it points to the local backend API:
+```env
+VITE_API_URL=http://localhost:4000/api
+```
+
+---
+
+### Step 3: Backend Setup (Install, Migrate & Seed)
+Open a terminal in the root folder:
+
+```powershell
+# 1. Navigate to backend directory
+cd backend
+
+# 2. Install backend dependencies
+npm install
+
+# 3. Generate Prisma client types (creates models & enums in node_modules)
+npm run db:generate
+
+# 4. Push schema to database (creates User, Product, Session tables in MySQL)
+npx prisma db push
+
+# 5. REQUIRED: Seed demo categories, products, customer, and admin accounts
+npm run seed
+
+# 6. Start the API server
+npm run dev
+```
+
+The backend server is now running at **[http://localhost:4000](http://localhost:4000)**.
+
+> 🔴 **CRITICAL:** **Do not skip `npx prisma db push` and `npm run seed`!**
+> If you start the app without pushing and seeding:
+> - The database will be completely empty (`User: 0`, `Product: 0`).
+> - Attempting to log in will fail with `Database request failed` or `Internal server error` because no tables or accounts exist yet.
+
+---
+
+### Step 4: Frontend Setup & Run
+Open a **second terminal** window:
+
+```powershell
+# 1. Navigate to frontend directory
+cd frontend
+
+# 2. Install frontend dependencies
+npm install
+
+# 3. Start the Vite dev server
+npm run dev
+```
+
+Open **[http://localhost:5173](http://localhost:5173)** in your browser!
+
+---
+
+### Step 5: Verify Login & Demo Accounts
+
+You can log in using either the form or the **1-Click Demo Login** buttons:
+
+| Account Role | Email | Password | Access / Capabilities |
 | :--- | :--- | :--- | :--- |
-| **Customer** | `customer@example.com` | `Customer12345!` | Shop, cart, in-page checkout, order history |
-| **Administrator** | `admin@example.com` | `Admin12345!` | Market Desk (`/admin`), product catalog, orders, escrow arbitration |
+| **Customer** | `customer@example.com` | `Customer12345!` | Browse catalog, add to cart, checkout, view order history |
+| **Administrator** | `admin@example.com` | `Admin12345!` | Access Market Desk at `/admin`, manage catalog, orders, escrow |
 
-> *Tip: You can also use the **1-Click Demo Login** buttons on the login page and checkout gate for instant evaluation.*
+---
+
+### 🛠️ Troubleshooting Common Issues
+
+| Error / Symptom | Root Cause | Solution |
+| :--- | :--- | :--- |
+| `Can't reach database server at localhost:3306` | MySQL is not started in XAMPP, or running on port 3307 instead of 3306. | Open XAMPP Control Panel and start MySQL. Check the port shown (e.g. 3306 or 3307), then update `DATABASE_URL` in `backend/.env` to match. |
+| `Database request failed` on login | MySQL tables have not been created yet. | Run `cd backend` and execute `npx prisma db push`. |
+| `Internal server error` on login | Database tables exist but are empty (`User: 0`). | Run `cd backend` and execute `npm run seed`. |
+| `Request failed with status code 429` | Rate limit triggered after rapid failed login attempts. | Stop the backend server (`Ctrl + C`) in your terminal and restart it (`npm run dev`). This immediately resets the in-memory rate limit counter. |
+| `SyntaxError: ... does not provide an export named 'WalletTransactionType'` | Prisma Client was not regenerated after schema changes. | Run `cd backend` followed by `npx prisma generate` (or `npm run db:generate`). |
+| `No command registered for push / studio` | An experimental Prisma 8 RC CLI was installed. | Make sure `package.json` specifies `"prisma": "^6.7.0"`, then run `npm install prisma@^6.7.0 --save-dev` in `backend/`. |
 
 ---
 

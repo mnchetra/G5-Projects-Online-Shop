@@ -29,6 +29,7 @@ export function errorHandler(error: unknown, _req: Request, res: Response, _next
     return;
   }
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    console.error(`[Prisma ${error.code}]:`, error.message);
     const status = error.code === 'P2025' ? 404 : error.code === 'P2002' || error.code === 'P2003' || error.code === 'P2034' ? 409 : 500;
     const message = error.code === 'P2025' ? 'Record not found' : error.code === 'P2002' ? 'A record with these details already exists' : error.code === 'P2034' ? 'The record changed during this request; retry it' : error.code === 'P2003' ? 'This record is still in use' : 'Database request failed';
     res.status(status).json({ success: false, error: { message } });
