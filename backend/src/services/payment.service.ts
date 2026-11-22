@@ -24,7 +24,6 @@ const khqrStatusSchema = z.object({ responseCode: z.union([z.number(), z.string(
 function gatewayConfig() {
   const accountId = process.env.BAKONG_ACCOUNT_ID?.trim();
   const merchantName = process.env.BAKONG_MERCHANT_NAME?.trim();
-  const storeLabel = process.env.BAKONG_STORE_LABEL?.trim() || 'Main Store';
   if (!accountId || !merchantName || accountId.toLowerCase().includes('your_')) {
     throw new HttpError(503, 'Bakong merchant settings are not configured');
   }
@@ -37,7 +36,7 @@ function gatewayConfig() {
   }
   if (apiBase.protocol !== 'https:') throw new HttpError(503, 'Bakong payment provider must use HTTPS');
 
-  return { accountId, merchantName, storeLabel, apiBase };
+  return { accountId, merchantName, apiBase };
 }
 
 export function assertBakongConfigured() {
@@ -45,7 +44,7 @@ export function assertBakongConfigured() {
 }
 
 async function readGatewayJson(response: Response) {
-  if (!response.ok) throw new HttpError(502, 'Bakong payment provider request failed');
+  if (!response.ok) throw new HttpError(502, `Bakong payment provider rejected the request (HTTP ${response.status})`);
   try {
     return await response.json() as unknown;
   } catch {
@@ -65,17 +64,16 @@ export async function createBakongKhqr(input: { orderNumber: string; amount: num
   const config = gatewayConfig();
   if (!Number.isFinite(input.amount) || input.amount <= 0) throw new HttpError(400, 'Payment amount is invalid');
 
-  const response = await requestGateway(new URL('/api/v1/khqr/generate', config.apiBase), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      accountId: config.accountId,
-      merchantName: config.merchantName,
-      amount: Number(input.amount.toFixed(2)),
-      currency: 'USD',
-      billNumber: input.orderNumber,
-      storeLabel: config.storeLabel
-    }),
+  const url = new URL('/api/v1/khqr/generate', config.apiBase);
+  url.searchParams.set('accountId', config.accountId);
+  url.searchParams.set('amount', input.amount.toFixed(2));
+  url.searchParams.set('currency', 'USD');
+  url.searchParams.set('billNumber', input.orderNumber);
+  url.searchParams.set('merchantName', config.merchantName);
+
+  const response = await requestGateway(url, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
     signal: AbortSignal.timeout(10000)
   });
   const body = await readGatewayJson(response);

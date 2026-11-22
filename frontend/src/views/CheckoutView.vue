@@ -143,7 +143,7 @@ function stopPaymentPolling() {
 
 function schedulePaymentPoll() {
   if (paymentPollAttempts >= maxPaymentPollAttempts || paymentStatus.value === 'PAID') return;
-  paymentPollTimer = window.setTimeout(() => void pollPaymentStatus(), 10000);
+  paymentPollTimer = window.setTimeout(() => void pollPaymentStatus(), 30000);
 }
 
 async function pollPaymentStatus() {
@@ -231,9 +231,9 @@ async function placeOrder() {
       <p>{{ t('checkout.orderNumber') }}: <strong>{{ orderNumber }}</strong></p>
 
       <div v-if="orderPaymentMethod === 'DEMO_WALLET'" class="payment-qr-box demo-wallet-box">
-        <span class="escrow-choice-badge">DEMO WALLET</span>
-        <p><strong>{{ money(paymentTotal) }}</strong> was deducted from your demo balance and marked as held for this order.</p>
-        <p>This is a database demonstration only. No real money is held or transferred. Confirm delivery after the goods arrive to mark the demo hold as released.</p>
+        <span class="escrow-choice-badge">{{ t('wallet.title') }}</span>
+        <p><strong>{{ money(paymentTotal) }}</strong> {{ t('wallet.orderDebited') }}</p>
+        <p>{{ t('wallet.orderHold') }}</p>
         <RouterLink :to="'/escrow/' + encodeURIComponent(orderNumber)" class="button button-dark escrow-link-btn">
           <ShieldCheck :size="15" /> View delivery confirmation
         </RouterLink>

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { ShieldCheck, UserCheck } from 'lucide-vue-next';
 import { useAuthStore } from '../stores/auth';
 import { api, apiErrorMessage } from '../services/api';
+import { resolveKhqrImageSource } from '../paymentQr';
 
 type CustomerOrder = {
   orderNumber: string;
@@ -23,6 +24,14 @@ type WalletTransaction = {
   createdAt: string;
   order?: { orderNumber: string } | null;
 };
+type WalletTopUp = {
+  id: string;
+  billNumber: string;
+  amount: number | string;
+  status: 'PENDING' | 'PAID' | 'FAILED' | 'EXPIRED';
+  qrImage: string | null;
+  expiresAt: string;
+};
 const { t, locale } = useI18n();
 const auth = useAuthStore();
 const route = useRoute();
@@ -36,7 +45,14 @@ const walletBalance = ref<number | null>(null);
 const walletTransactions = ref<WalletTransaction[]>([]);
 const walletLoading = ref(false);
 const walletError = ref('');
+const topUpAmount = ref<number | null>(10);
+const topUpLoading = ref(false);
+const topUpError = ref('');
+const topUpStatus = ref<WalletTopUp['status'] | null>(null);
+const activeTopUp = ref<WalletTopUp | null>(null);
+const topUpQrImage = ref<string | null>(null);
 const form = reactive({ name: '', email: '', phone: '', password: '' });
+let topUpPollTimer: number | undefined;
 
 onMounted(async () => {
   if (!auth.checked) await auth.fetchMe();
@@ -88,6 +104,12 @@ async function loadWallet() {
     const { data } = await api.get('/users/wallet');
     walletBalance.value = Number(data.data.balance);
     walletTransactions.value = data.data.transactions;
+    if (data.data.pendingTopUp) {
+      activeTopUp.value = data.data.pendingTopUp;
+      topUpStatus.value = 'PENDING';
+      topUpQrImage.value = resolveKhqrImageSource(data.data.pendingTopUp.qrImage);
+      startTopUpPolling();
+    }
   } catch (exception) {
     walletBalance.value = null;
     walletError.value = apiErrorMessage(exception);
@@ -96,6 +118,61 @@ async function loadWallet() {
     walletLoading.value = false;
   }
 }
+
+function stopTopUpPolling() {
+  if (topUpPollTimer !== undefined) window.clearTimeout(topUpPollTimer);
+  topUpPollTimer = undefined;
+}
+
+function scheduleTopUpPolling() {
+  if (topUpStatus.value !== 'PENDING') return;
+  topUpPollTimer = window.setTimeout(() => void pollTopUpStatus(), 30000);
+}
+
+function startTopUpPolling() {
+  stopTopUpPolling();
+  topUpPollTimer = window.setTimeout(() => void pollTopUpStatus(), 30000);
+}
+
+async function pollTopUpStatus() {
+  const topUp = activeTopUp.value;
+  if (!topUp || topUpStatus.value !== 'PENDING') return;
+  try {
+    const { data } = await api.post(`/users/wallet/topups/${encodeURIComponent(topUp.id)}/status`);
+    topUpStatus.value = data.data.status;
+    if (data.data.status === 'PAID') {
+      walletBalance.value = Number(data.data.balance);
+      await loadWallet();
+    } else if (data.data.status === 'PENDING') {
+      scheduleTopUpPolling();
+    } else {
+      stopTopUpPolling();
+    }
+  } catch (exception) {
+    topUpError.value = apiErrorMessage(exception);
+    scheduleTopUpPolling();
+  }
+}
+
+async function createTopUp() {
+  if (topUpAmount.value === null) return;
+  topUpLoading.value = true;
+  topUpError.value = '';
+  try {
+    const { data } = await api.post('/users/wallet/topups', { amount: Number(topUpAmount.value) });
+    activeTopUp.value = data.data.topUp;
+    topUpStatus.value = data.data.topUp.status;
+    topUpQrImage.value = resolveKhqrImageSource(data.data.topUp.qrImage);
+    if (!topUpQrImage.value) throw new Error(t('wallet.invalidQr'));
+    startTopUpPolling();
+  } catch (exception) {
+    topUpError.value = apiErrorMessage(exception);
+  } finally {
+    topUpLoading.value = false;
+  }
+}
+
+onBeforeUnmount(stopTopUpPolling);
 
 async function saveProfile() {
   error.value = ''; success.value = '';
@@ -146,9 +223,31 @@ const money = (value: number) => new Intl.NumberFormat(locale.value === 'km' ? '
       <div class="account-title-row"><div><span class="section-kicker">YOUR MARKET ACCOUNT</span><h1>{{ t('account.title') }}</h1><p>{{ auth.user.name }} · {{ auth.user.email }}</p></div><button class="button button-outline" type="button" @click="auth.logout">{{ t('account.signOut') }}</button></div>
       <p v-if="$route.query.admin === 'required'" class="form-error">{{ t('admin.access') }}</p>
       <section class="wallet-panel">
-        <div class="wallet-heading"><div><span class="section-kicker">DEMO WALLET</span><h2>Available balance</h2></div><strong>{{ walletBalance === null ? '—' : money(walletBalance) }}</strong></div>
-        <p>Demo balance only — no real money is held or transferred. Contact the store administrator to adjust this balance.</p>
+        <div class="wallet-heading"><div><span class="section-kicker">{{ t('wallet.title') }}</span><h2>{{ t('wallet.balance') }}</h2></div><strong>{{ walletBalance === null ? '—' : money(walletBalance) }}</strong></div>
+        <p>{{ t('wallet.notice') }}</p>
         <p v-if="walletError" class="form-error" role="alert">{{ walletError }}</p>
+        <div class="wallet-topup">
+          <h3>{{ t('wallet.topUpTitle') }}</h3>
+          <p>{{ t('wallet.topUpHint') }}</p>
+          <form class="wallet-topup-form" @submit.prevent="createTopUp">
+            <label class="form-field">
+              <span>{{ t('wallet.amount') }}</span>
+              <input v-model.number="topUpAmount" type="number" min="0.01" max="1000000" step="0.01" required />
+            </label>
+            <button class="button button-dark" type="submit" :disabled="topUpLoading || topUpStatus === 'PENDING'">
+              {{ topUpLoading ? t('common.loading') : t('wallet.generateQr') }}
+            </button>
+          </form>
+          <p v-if="topUpError" class="form-error" role="alert">{{ topUpError }}</p>
+          <div v-if="activeTopUp" class="wallet-topup-result" aria-live="polite">
+            <img v-if="topUpStatus === 'PENDING' && topUpQrImage" :src="topUpQrImage" :alt="t('wallet.qrAlt')" class="wallet-topup-qr" />
+            <p v-if="topUpStatus === 'PENDING'">{{ t('wallet.pending', { amount: money(Number(activeTopUp.amount)) }) }}</p>
+            <p v-else-if="topUpStatus === 'PAID'" class="form-success">{{ t('wallet.paid') }}</p>
+            <p v-else-if="topUpStatus === 'EXPIRED'" class="form-error">{{ t('wallet.expired') }}</p>
+            <p v-else-if="topUpStatus === 'FAILED'" class="form-error">{{ t('wallet.failed') }}</p>
+            <small>{{ t('wallet.reference') }}: {{ activeTopUp.billNumber }}</small>
+          </div>
+        </div>
         <div class="wallet-history">
           <h3>Wallet activity</h3>
           <p v-if="walletLoading" class="muted-empty">{{ t('common.loading') }}</p>
@@ -239,6 +338,39 @@ const money = (value: number) => new Intl.NumberFormat(locale.value === 'km' ? '
 }
 .wallet-history {
   margin-top: 20px;
+}
+.wallet-topup {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid #e4e9e4;
+  border-radius: 6px;
+  background: #fbfcfa;
+}
+.wallet-topup h3 {
+  margin: 0;
+}
+.wallet-topup-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+.wallet-topup-form .form-field {
+  width: min(240px, 100%);
+  margin: 0;
+}
+.wallet-topup-result {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin-top: 16px;
+}
+.wallet-topup-result p {
+  margin: 0;
+}
+.wallet-topup-qr {
+  width: min(240px, 100%);
+  border: 1px solid #dfe5df;
+  border-radius: 4px;
 }
 .wallet-history h3 {
   margin-bottom: 12px;

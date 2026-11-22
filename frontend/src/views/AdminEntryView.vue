@@ -7,6 +7,6 @@ const auth = useAuthStore();
 </script>
 
 <template>
-  <AdminView v-if="auth.user?.role === 'ADMIN'" />
+  <AdminView v-if="auth.user?.role === 'ADMIN' || auth.user?.role === 'SUPER_ADMIN'" />
   <AdminLoginView v-else />
 </template>

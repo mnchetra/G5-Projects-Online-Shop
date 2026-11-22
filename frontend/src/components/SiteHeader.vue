@@ -44,7 +44,7 @@ async function signOut() {
           <UserRound :size="18" />
           <span v-if="auth.user" class="header-user-badge">{{ auth.user.name.split(' ')[0] }}</span>
         </RouterLink>
-        <RouterLink v-if="auth.user?.role === 'ADMIN'" to="/admin" class="admin-link">{{ t('nav.admin') }}</RouterLink>
+        <RouterLink v-if="auth.user?.role === 'ADMIN' || auth.user?.role === 'SUPER_ADMIN'" to="/admin" class="admin-link">{{ t('nav.admin') }}</RouterLink>
         <button v-if="auth.user" class="icon-link signout-link" :aria-label="t('account.signOut')" :title="t('account.signOut')" @click="signOut"><LogOut :size="18" /></button>
         <RouterLink to="/cart" class="bag-link" :aria-label="`${t('cart.title')}, ${cart.count} items`"><ShoppingBag :size="19" /><span class="bag-count">{{ cart.count }}</span></RouterLink>
         <button class="mobile-menu icon-link" type="button" :aria-label="menuOpen ? t('common.close') : t('nav.menu')" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen"><X v-if="menuOpen" :size="20" /><Menu v-else :size="20" /></button>
@@ -54,7 +54,7 @@ async function signOut() {
       <RouterLink to="/shop" @click="menuOpen = false">{{ t('nav.shop') }}</RouterLink>
       <a href="/#our-way" @click="menuOpen = false">{{ t('nav.story') }}</a>
       <RouterLink :to="auth.user ? '/account' : '/login'" @click="menuOpen = false">{{ auth.user ? t('nav.account') : t('account.login') }}</RouterLink>
-      <RouterLink v-if="auth.user?.role === 'ADMIN'" to="/admin" @click="menuOpen = false">{{ t('nav.admin') }}</RouterLink>
+      <RouterLink v-if="auth.user?.role === 'ADMIN' || auth.user?.role === 'SUPER_ADMIN'" to="/admin" @click="menuOpen = false">{{ t('nav.admin') }}</RouterLink>
     </nav>
   </header>
 </template>

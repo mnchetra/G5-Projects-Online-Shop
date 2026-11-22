@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { OrderStatus } from '@prisma/client';
+import { EscrowStatus, OrderStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { checkout } from '../services/order.service.js';
 import { HttpError, success } from '../utils/http.js';
@@ -110,8 +110,15 @@ export async function getOrder(req: Request, res: Response) {
 export async function updateOrderStatus(req: Request, res: Response) {
   const status = req.body.status as OrderStatus;
   const order = await prisma.$transaction(async (tx) => {
-    const current = await tx.order.findUnique({ where: { id: req.params.id }, include: { items: true } });
+    const current = await tx.order.findUnique({ where: { id: req.params.id }, include: { items: true, escrow: true } });
     if (!current) throw new HttpError(404, 'Order not found');
+    const activeEscrowStatuses = new Set<EscrowStatus>([EscrowStatus.FUNDS_LOCKED, EscrowStatus.DISPATCHED, EscrowStatus.DISPUTED]);
+    if (current.escrow && activeEscrowStatuses.has(current.escrow.status) && status === OrderStatus.CANCELLED) {
+      throw new HttpError(409, 'Paid escrow orders must use the customer cancellation request and Super Admin review');
+    }
+    if (current.escrow && activeEscrowStatuses.has(current.escrow.status) && status === OrderStatus.DELIVERED) {
+      throw new HttpError(409, 'The customer must confirm delivery to release the escrow status');
+    }
     if (current.status === OrderStatus.CANCELLED && status !== OrderStatus.CANCELLED) {
       throw new HttpError(409, 'Cancelled orders cannot be reopened');
     }

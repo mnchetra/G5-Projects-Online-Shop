@@ -1,6 +1,6 @@
 # Mekong Market
 
-A modern bilingual English–Khmer e-commerce platform for Cambodian-made goods. Built with a Vue 3/Vite storefront and an Express REST API backed by MySQL and Prisma. Escrow and the demo wallet are database simulations; they do not custody or transfer real funds.
+A modern bilingual English–Khmer e-commerce platform for Cambodian-made goods. Built with a Vue 3/Vite storefront and an Express REST API backed by MySQL and Prisma. KHQR wallet deposits are credited only after provider verification; balances are store credit and cannot be withdrawn. Escrow and delivery statuses remain database-tracked and do not initiate separate payouts.
 
 ---
 
@@ -14,12 +14,13 @@ A modern bilingual English–Khmer e-commerce platform for Cambodian-made goods.
 
 2. **Database-Tracked Order Holds (Demo):**
    - The app records payment, shipment, buyer confirmation, dispute, and refund statuses in MySQL.
+   - A customer can report an issue, an administrator can submit the store response, and only a Super Admin can record the final release/refund decision.
    - Buyer confirmation marks an order hold as released; it does not call or pay a smart contract.
    - The status tracker at `/escrow/:orderNumber` is available only to the order owner and administrators.
    - Admin Escrow Desk supports dispatch and dispute status management.
 
 3. **Multi-Payment Support:**
-   - **Demo Wallet** (admin-adjustable credits and transaction history; no real money)
+   - **Store Wallet** (KHQR top-ups, payment verification, and transaction history)
    - **Bakong KHQR** (dynamic QR payment generation; this app does not custody funds)
    - **Cash on Delivery (COD)**
 
@@ -27,7 +28,7 @@ A modern bilingual English–Khmer e-commerce platform for Cambodian-made goods.
    - Instant toggle between English and ភាសាខ្មែរ across all catalog views, checkout, account, and admin desks.
 
 5. **MySQL Database on XAMPP phpMyAdmin:**
-   - Fully relational schema managed via Prisma ORM on port `3307` (`online_shop_db`).
+   - Fully relational schema managed via Prisma ORM on port `3306` by default (`online_shop_db`).
 
 ---
 
@@ -104,6 +105,8 @@ Open `backend/.env` in your editor and verify your `DATABASE_URL`:
   ```
 > ⚠️ **Important:** The protocol MUST be `mysql://`. Do not use `postgresql://` and ensure there are no duplicate `DATABASE_URL=` strings. If your MySQL `root` user has a password, format it like `mysql://root:yourpassword@localhost:3306/online_shop_db`.
 
+To generate live Bakong KHQR payments, set `BAKONG_ACCOUNT_ID` and `BAKONG_MERCHANT_NAME` in `backend/.env` to the registered merchant details. The KHQR API base URL is `https://lorndavid.online`.
+
 #### 2.2 Frontend `.env`
 ```powershell
 # PowerShell:
@@ -132,20 +135,25 @@ npm install
 # 3. Generate Prisma client types (creates models & enums in node_modules)
 npm run db:generate
 
-# 4. Push schema to database (creates User, Product, Session tables in MySQL)
-npx prisma db push
+# 4. Apply the committed Prisma migrations (creates all application tables)
+npm run db:deploy
 
-# 5. REQUIRED: Seed demo categories, products, customer, and admin accounts
+# 5. Create the initial super-admin account
+# Set SUPER_ADMIN_EMAIL, SUPER_ADMIN_NAME, and a unique password (10-128 characters)
+# in backend/.env before running this command.
+npm run db:bootstrap-super-admin
+
+# 6. Seed demo categories, products, customer, and demo administrator accounts
 npm run seed
 
-# 6. Start the API server
+# 7. Start the API server
 npm run dev
 ```
 
 The backend server is now running at **[http://localhost:4000](http://localhost:4000)**.
 
-> 🔴 **CRITICAL:** **Do not skip `npx prisma db push` and `npm run seed`!**
-> If you start the app without pushing and seeding:
+> 🔴 **CRITICAL:** **Do not skip `npm run db:deploy` and `npm run seed`!**
+> If you start the app without migrating and seeding:
 > - The database will be completely empty (`User: 0`, `Product: 0`).
 > - Attempting to log in will fail with `Database request failed` or `Internal server error` because no tables or accounts exist yet.
 
@@ -177,6 +185,7 @@ You can log in using either the form or the **1-Click Demo Login** buttons:
 | :--- | :--- | :--- | :--- |
 | **Customer** | `customer@example.com` | `Customer12345!` | Browse catalog, add to cart, checkout, view order history |
 | **Administrator** | `admin@example.com` | `Admin12345!` | Access Market Desk at `/admin`, manage catalog, orders, escrow |
+| **Super administrator** | `menglyck2@gmail.com` | Set in `backend/.env` | Full admin access and create administrator accounts |
 
 ---
 
@@ -185,7 +194,7 @@ You can log in using either the form or the **1-Click Demo Login** buttons:
 | Error / Symptom | Root Cause | Solution |
 | :--- | :--- | :--- |
 | `Can't reach database server at localhost:3306` | MySQL is not started in XAMPP, or running on port 3307 instead of 3306. | Open XAMPP Control Panel and start MySQL. Check the port shown (e.g. 3306 or 3307), then update `DATABASE_URL` in `backend/.env` to match. |
-| `Database request failed` on login | MySQL tables have not been created yet. | Run `cd backend` and execute `npx prisma db push`. |
+| `Database request failed` on login | MySQL tables have not been created yet. | Run `cd backend` and execute `npm run db:deploy`. |
 | `Internal server error` on login | Database tables exist but are empty (`User: 0`). | Run `cd backend` and execute `npm run seed`. |
 | `Request failed with status code 429` | Rate limit triggered after rapid failed login attempts. | Stop the backend server (`Ctrl + C`) in your terminal and restart it (`npm run dev`). This immediately resets the in-memory rate limit counter. |
 | `SyntaxError: ... does not provide an export named 'WalletTransactionType'` | Prisma Client was not regenerated after schema changes. | Run `cd backend` followed by `npx prisma generate` (or `npm run db:generate`). |
@@ -213,8 +222,8 @@ npm --prefix frontend run build
 
 - **Authentication & Sessions:** Passwords hashed with bcrypt; HTTP-only SameSite=Lax session cookies storing cryptographic SHA-256 tokens.
 - **Order Protection:** Guests cannot place orders (`requireAuth` guard). Price recalculation and inventory decrements execute inside serializable database transactions.
-- **Demo Wallet:** Admin credit/debit adjustments and checkout holds are recorded in an append-only transaction history. Balances are not cash, deposits, or withdrawable funds. Demo-wallet orders remain marked as held until the buyer confirms delivery; approved refunds restore the demo balance.
+- **Store Wallet:** KHQR top-ups are added to the wallet only after the provider confirms payment. Wallet balances are store credit for purchases here and are not withdrawable. Checkout and delivery statuses are recorded in the transaction history; wallet refunds restore the store balance and do not initiate a separate bank transfer.
 - **Escrow Status:** Shipment, confirmation, and dispute state changes are database-only. The Solidity source is not deployed or called by the backend, so this is not real smart-contract protection or payout.
 - **Application Security:** Helmet security headers, credentialed CORS, Zod schema validation, API rate limiting, and parameterized Prisma queries prevent SQL injection and brute-force attacks.
 
-See [docs/api.md](docs/api.md) for REST API endpoints and demo-wallet behavior.
+See [docs/api.md](docs/api.md) for REST API endpoints and wallet top-up behavior.

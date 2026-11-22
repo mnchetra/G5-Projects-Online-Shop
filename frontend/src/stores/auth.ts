@@ -2,7 +2,7 @@ import { ref } from 'vue';
 import { defineStore } from 'pinia';
 import { api } from '../services/api';
 
-export type SessionUser = { id: string; name: string; email: string; phone?: string | null; role: 'CUSTOMER' | 'ADMIN' };
+export type SessionUser = { id: string; name: string; email: string; phone?: string | null; role: 'CUSTOMER' | 'ADMIN' | 'SUPER_ADMIN' };
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<SessionUser | null>(null);

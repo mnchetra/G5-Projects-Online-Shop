@@ -1,14 +1,19 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { addAddress, addresses, updateProfile, wallet } from '../controllers/user.controller.js';
+import { checkTopUp, createTopUp } from '../controllers/wallet.controller.js';
 import { requireAuth } from '../middleware/auth.js';
+import { khqrGenerationLimiter, khqrStatusLimiter } from '../middleware/khqrRateLimit.js';
 import { validateBody } from '../middleware/validate.js';
 import { asyncHandler } from '../utils/http.js';
+import { walletTopUpSchema } from '../validators/schemas.js';
 
 const router = Router();
 router.use(requireAuth);
 router.get('/addresses', asyncHandler(addresses));
 router.get('/wallet', asyncHandler(wallet));
+router.post('/wallet/topups', khqrGenerationLimiter, validateBody(walletTopUpSchema), asyncHandler(createTopUp));
+router.post('/wallet/topups/:topUpId/status', khqrStatusLimiter, asyncHandler(checkTopUp));
 router.post('/addresses', validateBody(z.object({ recipient: z.string().trim().min(2), phone: z.string().trim().min(6), line1: z.string().trim().min(5), city: z.string().trim().min(2), province: z.string().trim().min(2), postalCode: z.string().optional(), isDefault: z.boolean().optional() })), asyncHandler(addAddress));
 router.patch('/profile', validateBody(z.object({ name: z.string().trim().min(2).max(100).optional(), phone: z.string().trim().min(6).max(30).optional() })), asyncHandler(updateProfile));
 export default router;

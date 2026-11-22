@@ -5,7 +5,6 @@ const configureGateway = () => {
   vi.stubEnv('KHQR_API_BASE_URL', 'https://lorndavid.online');
   vi.stubEnv('BAKONG_ACCOUNT_ID', 'mekong_shop@bkrt');
   vi.stubEnv('BAKONG_MERCHANT_NAME', 'Mekong Shop');
-  vi.stubEnv('BAKONG_STORE_LABEL', 'Main Store');
 };
 
 afterEach(() => {
@@ -21,7 +20,7 @@ describe('Bakong KHQR gateway adapter', () => {
     expect(() => assertBakongConfigured()).toThrow('merchant settings are not configured');
   });
 
-  it('creates a server-priced USD KHQR without sending an API key', async () => {
+  it('creates a server-priced USD KHQR using the documented GET parameters', async () => {
     configureGateway();
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       qr: 'EMVCO-KHQR-PAYLOAD',
@@ -32,10 +31,18 @@ describe('Bakong KHQR gateway adapter', () => {
 
     const result = await createBakongKhqr({ orderNumber: 'MM-ORDER-123', amount: 28.5 });
     const [url, options] = fetchMock.mock.calls[0] as [string | URL, RequestInit];
-    const requestBody = JSON.parse(String(options.body));
+    const requestUrl = new URL(String(url));
 
-    expect(String(url)).toBe('https://lorndavid.online/api/v1/khqr/generate');
-    expect(requestBody).toEqual({ accountId: 'mekong_shop@bkrt', merchantName: 'Mekong Shop', amount: 28.5, currency: 'USD', billNumber: 'MM-ORDER-123', storeLabel: 'Main Store' });
+    expect(requestUrl.origin + requestUrl.pathname).toBe('https://lorndavid.online/api/v1/khqr/generate');
+    expect(Object.fromEntries(requestUrl.searchParams)).toEqual({
+      accountId: 'mekong_shop@bkrt',
+      amount: '28.50',
+      currency: 'USD',
+      billNumber: 'MM-ORDER-123',
+      merchantName: 'Mekong Shop'
+    });
+    expect(options.method).toBe('GET');
+    expect(options.body).toBeUndefined();
     expect(new Headers(options.headers).has('authorization')).toBe(false);
     expect(result.md5).toBe('e2fc714c4727ee9395f324cd2e7f331f');
     expect(result.qrImage).toContain('data:image/png;base64,');
@@ -60,6 +67,14 @@ describe('Bakong KHQR gateway adapter', () => {
 
     await expect(checkBakongKhqr('payment-reference')).resolves.toEqual({ paid: true });
     expect(String(fetchMock.mock.calls[0][0])).toBe('https://lorndavid.online/api/v1/check/payment-reference');
+  });
+
+  it('surfaces the provider HTTP status when QR generation is rejected', async () => {
+    configureGateway();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 400 })));
+
+    await expect(createBakongKhqr({ orderNumber: 'MM-ORDER-125', amount: 12.5 }))
+      .rejects.toThrow('HTTP 400');
   });
 
   it('rejects a non-HTTPS provider URL', async () => {

@@ -59,6 +59,16 @@ export const requireAuth: RequestHandler = (req, _res, next) => {
 };
 
 export const requireAdmin: RequestHandler = (req, _res, next) => {
-  if (req.auth?.role !== UserRole.ADMIN) return next(new HttpError(403, 'Administrator access required'));
+  if (req.auth?.role !== UserRole.ADMIN && req.auth?.role !== UserRole.SUPER_ADMIN) return next(new HttpError(403, 'Administrator access required'));
+  next();
+};
+
+export const requireSuperAdmin: RequestHandler = (req, _res, next) => {
+  if (req.auth?.role !== UserRole.SUPER_ADMIN) return next(new HttpError(403, 'Super administrator access required'));
+  next();
+};
+
+export const requireAdminOperator: RequestHandler = (req, _res, next) => {
+  if (req.auth?.role !== UserRole.ADMIN) return next(new HttpError(403, 'Administrator response access required'));
   next();
 };

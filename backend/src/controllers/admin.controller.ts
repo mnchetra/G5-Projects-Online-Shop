@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import bcrypt from 'bcryptjs';
 import { fileTypeFromBuffer } from 'file-type';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
@@ -52,6 +53,31 @@ export async function adminCustomers(_req: Request, res: Response) {
   res.json(success(items));
 }
 
+export async function adminAccounts(_req: Request, res: Response) {
+  const accounts = await prisma.user.findMany({
+    where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] } },
+    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    orderBy: { createdAt: 'desc' }
+  });
+  res.json(success(accounts));
+}
+
+export async function createAdminAccount(req: Request, res: Response) {
+  const { name, email, password } = req.body as { name: string; email: string; password: string };
+  try {
+    const account = await prisma.user.create({
+      data: { name, email, role: 'ADMIN', passwordHash: await bcrypt.hash(password, 12) },
+      select: { id: true, name: true, email: true, role: true, createdAt: true }
+    });
+    res.status(201).json(success(account));
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new HttpError(409, 'An account with this email already exists');
+    }
+    throw error;
+  }
+}
+
 export async function adminCustomerWallet(req: Request, res: Response) {
   const customer = await prisma.user.findFirst({
     where: { id: req.params.id, role: 'CUSTOMER' },
@@ -88,7 +114,7 @@ export async function adjustCustomerWallet(req: Request, res: Response) {
     if (!customer) throw new HttpError(404, 'Customer not found');
     const maxBalance = new Prisma.Decimal('9999999999.99');
     if (direction === 'CREDIT' && customer.walletBalance.add(amount).greaterThan(maxBalance)) {
-      throw new HttpError(409, 'Demo wallet balance limit exceeded');
+      throw new HttpError(409, 'Wallet balance limit exceeded');
     }
 
     const updated = await tx.user.updateMany({
@@ -102,7 +128,7 @@ export async function adjustCustomerWallet(req: Request, res: Response) {
       data: { walletBalance: direction === 'CREDIT' ? { increment: amount } : { decrement: amount } }
     });
     if (updated.count !== 1) {
-      throw new HttpError(409, direction === 'DEBIT' ? 'Customer has insufficient demo wallet balance' : 'Demo wallet balance limit exceeded');
+      throw new HttpError(409, direction === 'DEBIT' ? 'Customer has insufficient wallet balance' : 'Wallet balance limit exceeded');
     }
 
     const updatedCustomer = await tx.user.findUniqueOrThrow({

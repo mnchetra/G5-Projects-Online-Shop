@@ -38,12 +38,12 @@ export async function checkout(input: CheckoutInput, userId?: string) {
     let walletBalanceAfter: Prisma.Decimal | null = null;
 
     if (isDemoWallet) {
-      if (!userId) throw new HttpError(401, 'Sign in to use the demo wallet');
+      if (!userId) throw new HttpError(401, 'Sign in to use the store wallet');
       const debit = await tx.user.updateMany({
         where: { id: userId, role: 'CUSTOMER', walletBalance: { gte: total } },
         data: { walletBalance: { decrement: total } }
       });
-      if (debit.count !== 1) throw new HttpError(409, 'Insufficient demo wallet balance');
+      if (debit.count !== 1) throw new HttpError(409, 'Insufficient wallet balance');
       const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { walletBalance: true } });
       walletBalanceAfter = user.walletBalance;
     }
@@ -59,17 +59,17 @@ export async function checkout(input: CheckoutInput, userId?: string) {
           create: {
             method: input.paymentMethod,
             amount: total,
-            ...(isDemoWallet ? { status: PaymentStatus.PAID, provider: 'Demo wallet ledger' } : {})
+            ...(isDemoWallet ? { status: PaymentStatus.PAID, provider: 'Store wallet ledger' } : {})
           }
         },
         ...(isEscrow || isDemoWallet ? {
           escrow: {
             create: {
               ...(isDemoWallet ? {
-                contractAddress: 'DEMO_WALLET_LEDGER',
-                contractNetwork: 'Database demo only - no real funds',
-                buyerAddress: 'DEMO_CUSTOMER_WALLET',
-                sellerAddress: 'DEMO_STORE_LEDGER',
+                contractAddress: 'STORE_WALLET_LEDGER',
+                contractNetwork: 'Store wallet; order status database tracked',
+                buyerAddress: 'CUSTOMER_ACCOUNT',
+                sellerAddress: 'STORE_ACCOUNT',
                 arbiterAddress: 'DEMO_ADMIN_REVIEW'
               } : {
                 contractAddress: 'DATABASE_STATUS_ONLY',
@@ -98,7 +98,7 @@ export async function checkout(input: CheckoutInput, userId?: string) {
           type: WalletTransactionType.ORDER_HOLD,
           amount: total,
           balanceAfter: walletBalanceAfter,
-          note: `Demo wallet hold for order ${orderNumber}`
+          note: `Store wallet balance used for order ${orderNumber}`
         }
       });
     }

@@ -5,11 +5,31 @@ import {
   ExternalLink, Search, RefreshCw, Send, Check, Clock
 } from 'lucide-vue-next';
 import { api, apiErrorMessage } from '../services/api';
+import { useAuthStore } from '../stores/auth';
+import EvidenceUploader from './EvidenceUploader.vue';
+import EscrowEvidenceGallery from './EscrowEvidenceGallery.vue';
+
+type EscrowEvidence = {
+  id: string;
+  stage: 'CUSTOMER' | 'ADMIN' | 'SUPER_ADMIN';
+  originalName: string;
+  mimeType: string;
+  fileSize: number;
+  createdAt: string;
+  uploader: { name: string };
+};
 
 type AdminEscrowRecord = {
   id: string;
   orderId: string;
-  disputeReason?: string;
+  disputeReason?: string | null;
+  adminResponse?: string | null;
+  adminRespondedAt?: string | null;
+  adminRespondedBy?: { name: string; email: string } | null;
+  resolutionNotes?: string | null;
+  arbitratedAt?: string | null;
+  arbitratedBy?: { name: string; email: string } | null;
+  evidence: EscrowEvidence[];
   amount: number | string;
   bakongMd5?: string;
   status: 'INITIATED' | 'FUNDS_LOCKED' | 'DISPATCHED' | 'RELEASED' | 'DISPUTED' | 'REFUNDED';
@@ -43,8 +63,10 @@ type EscrowStats = {
 };
 
 const props = defineProps<{ locale: string; lightMode: boolean }>();
+const auth = useAuthStore();
 
 const isKhmer = computed(() => props.locale === 'km');
+const isSuperAdmin = computed(() => auth.user?.role === 'SUPER_ADMIN');
 const money = (val: number | string) =>
   new Intl.NumberFormat(isKhmer.value ? 'km-KH' : 'en-US', { style: 'currency', currency: 'USD' }).format(Number(val));
 
@@ -60,12 +82,17 @@ const searchInput = ref<string>('');
 // Modals
 const actionLoading = ref(false);
 const showDispatchModal = ref(false);
+const showResponseModal = ref(false);
 const showResolveModal = ref(false);
 const selectedEscrow = ref<AdminEscrowRecord | null>(null);
 
 const inspectionDaysInput = ref(3);
 const disputeResolution = ref<'RELEASE_TO_SELLER' | 'REFUND_TO_BUYER'>('RELEASE_TO_SELLER');
 const disputeNotes = ref('');
+const adminResponse = ref('');
+const restockReturnedItems = ref(false);
+const adminEvidence = ref<File[]>([]);
+const resolutionEvidence = ref<File[]>([]);
 
 async function loadEscrows() {
   loading.value = true;
@@ -95,7 +122,16 @@ function openResolveModal(escrow: AdminEscrowRecord) {
   selectedEscrow.value = escrow;
   disputeResolution.value = 'RELEASE_TO_SELLER';
   disputeNotes.value = '';
+  restockReturnedItems.value = false;
+  resolutionEvidence.value = [];
   showResolveModal.value = true;
+}
+
+function openResponseModal(escrow: AdminEscrowRecord) {
+  selectedEscrow.value = escrow;
+  adminResponse.value = escrow.adminResponse || '';
+  adminEvidence.value = [];
+  showResponseModal.value = true;
 }
 
 async function submitDispatch() {
@@ -118,20 +154,52 @@ async function submitDispatch() {
 }
 
 async function submitResolve() {
-  if (!selectedEscrow.value) return;
+  if (!selectedEscrow.value || !selectedEscrow.value.adminResponse || disputeNotes.value.trim().length < 3) return;
   actionLoading.value = true;
   error.value = '';
   successMessage.value = '';
   try {
-    const { data } = await api.post(`/admin/escrows/${encodeURIComponent(selectedEscrow.value.order.orderNumber)}/resolve`, {
-      resolution: disputeResolution.value,
-      notes: disputeNotes.value.trim() || 'Arbitrated by administrator'
-    });
+    const form = new FormData();
+    form.append('resolution', disputeResolution.value);
+    form.append('notes', disputeNotes.value.trim());
+    form.append('restockItems', String(restockReturnedItems.value));
+    resolutionEvidence.value.forEach((file) => form.append('evidence', file));
+    const { data } = await api.post(
+      `/admin/escrows/${encodeURIComponent(selectedEscrow.value.order.orderNumber)}/resolve`,
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
     successMessage.value = data.data.message || 'Dispute resolved!';
     showResolveModal.value = false;
+    resolutionEvidence.value = [];
     await loadEscrows();
   } catch (err) {
     error.value = apiErrorMessage(err) || 'Failed to resolve dispute';
+  } finally {
+    actionLoading.value = false;
+  }
+}
+
+async function submitResponse() {
+  if (!selectedEscrow.value || adminResponse.value.trim().length < 5) return;
+  actionLoading.value = true;
+  error.value = '';
+  successMessage.value = '';
+  try {
+    const form = new FormData();
+    form.append('response', adminResponse.value.trim());
+    adminEvidence.value.forEach((file) => form.append('evidence', file));
+    const { data } = await api.post(
+      `/admin/escrows/${encodeURIComponent(selectedEscrow.value.order.orderNumber)}/respond`,
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
+    successMessage.value = data.data.message || 'Response recorded for Super Admin review.';
+    showResponseModal.value = false;
+    adminEvidence.value = [];
+    await loadEscrows();
+  } catch (err) {
+    error.value = apiErrorMessage(err) || 'Failed to record the response';
   } finally {
     actionLoading.value = false;
   }
@@ -271,12 +339,21 @@ onMounted(loadEscrows);
                   <Send :size="12" /> Dispatch
                 </button>
                 <button
-                  v-if="e.status === 'DISPUTED'"
+                  v-if="e.status === 'DISPUTED' && isSuperAdmin"
                   class="btn-action btn-arbitrate"
-                  title="Arbitrate dispute between buyer and seller"
+                  :disabled="!e.adminResponse"
+                  :title="e.adminResponse ? 'Make the final Super Admin decision' : 'Waiting for the admin response'"
                   @click="openResolveModal(e)"
                 >
-                  <Scale :size="12" /> Arbitrate
+                  <Scale :size="12" /> Final decision
+                </button>
+                <button
+                  v-else-if="e.status === 'DISPUTED'"
+                  class="btn-action btn-dispatch"
+                  title="Submit the store response for Super Admin review"
+                  @click="openResponseModal(e)"
+                >
+                  <Send :size="12" /> {{ e.adminResponse ? 'Update response' : 'Respond' }}
                 </button>
                 <RouterLink
                   :to="'/escrow/' + e.order.orderNumber"
@@ -315,14 +392,53 @@ onMounted(loadEscrows);
       </div>
     </div>
 
+    <!-- Store Response Modal -->
+    <div v-if="showResponseModal && selectedEscrow" class="modal-backdrop" @click.self="showResponseModal = false">
+      <div class="modal-box">
+        <h3>Store Response for Super Admin Review</h3>
+        <div class="dispute-quote">
+          <strong>Customer report:</strong>
+          <p>{{ selectedEscrow.disputeReason || 'No details provided' }}</p>
+        </div>
+        <EscrowEvidenceGallery
+          v-if="selectedEscrow.evidence.length"
+          :order-number="selectedEscrow.order.orderNumber"
+          :evidence="selectedEscrow.evidence"
+          :locale="props.locale"
+        />
+        <label class="form-field">
+          <span>Admin response / evidence *</span>
+          <textarea v-model.trim="adminResponse" rows="4" minlength="5" maxlength="2000" placeholder="Describe the store's findings and any evidence."></textarea>
+        </label>
+        <EvidenceUploader v-model="adminEvidence" :locale="props.locale" />
+        <p class="arbitration-hint">The order remains disputed. Only a Super Admin can make the final decision.</p>
+        <div class="modal-actions">
+          <button class="button button-outline" type="button" @click="showResponseModal = false">Cancel</button>
+          <button class="button button-dark" type="button" :disabled="actionLoading || adminResponse.trim().length < 5" @click="submitResponse">
+            {{ actionLoading ? 'Submitting...' : 'Send to Super Admin' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Resolve Dispute Modal -->
     <div v-if="showResolveModal && selectedEscrow" class="modal-backdrop" @click.self="showResolveModal = false">
       <div class="modal-box">
-        <h3>Arbitrate Escrow Dispute</h3>
+        <h3>Final Super Admin Decision</h3>
         <div class="dispute-quote">
-          <strong>Buyer Reason:</strong>
-          <p>"{{ selectedEscrow.disputeReason || 'No details provided' }}"</p>
+          <strong>Customer report:</strong>
+          <p>{{ selectedEscrow.disputeReason || 'No details provided' }}</p>
         </div>
+        <div class="dispute-quote">
+          <strong>Store response<span v-if="selectedEscrow.adminRespondedBy"> — {{ selectedEscrow.adminRespondedBy.name }}</span>:</strong>
+          <p>{{ selectedEscrow.adminResponse }}</p>
+        </div>
+        <EscrowEvidenceGallery
+          v-if="selectedEscrow.evidence.length"
+          :order-number="selectedEscrow.order.orderNumber"
+          :evidence="selectedEscrow.evidence"
+          :locale="props.locale"
+        />
         <fieldset class="resolution-choice">
           <legend>Arbitration Ruling</legend>
           <label>
@@ -334,14 +450,20 @@ onMounted(loadEscrows);
             <span><strong>Refund to Buyer</strong> (Goods damaged / not delivered)</span>
           </label>
         </fieldset>
+        <label v-if="disputeResolution === 'REFUND_TO_BUYER'" class="restock-choice">
+          <input v-model="restockReturnedItems" type="checkbox" />
+          <span>{{ isKhmer ? 'បញ្ចូលទំនិញចូលស្តុកវិញ តែបើបានទទួល និងត្រួតពិនិត្យថាអាចលក់បាន' : 'Restock items only if returned, inspected, and sellable' }}</span>
+        </label>
         <label class="form-field">
-          <span>Arbitration Notes / Ruling *</span>
+          <span>Final decision and reason *</span>
           <textarea v-model.trim="disputeNotes" rows="2" placeholder="Explain the ruling for audit records..."></textarea>
         </label>
+        <EvidenceUploader v-model="resolutionEvidence" :locale="props.locale" />
+        <p class="arbitration-hint">This decision is final and recorded with your Super Admin account. No real bank transfer is performed by this demo.</p>
         <div class="modal-actions">
           <button class="button button-outline" type="button" @click="showResolveModal = false">Cancel</button>
-          <button class="button button-dark" type="button" :disabled="actionLoading" @click="submitResolve">
-            {{ actionLoading ? 'Submitting Ruling...' : 'Execute Arbitration Ruling' }}
+          <button class="button button-dark" type="button" :disabled="actionLoading || disputeNotes.trim().length < 3 || !selectedEscrow.adminResponse" @click="submitResolve">
+            {{ actionLoading ? 'Submitting...' : 'Record final decision' }}
           </button>
         </div>
       </div>
@@ -355,6 +477,9 @@ onMounted(loadEscrows);
   flex-direction: column;
   gap: 1.5rem;
 }
+.arbitration-hint { color: #966d14; font-size: 0.82rem; line-height: 1.5; }
+.restock-choice { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; color: #49534b; font-size: 0.85rem; line-height: 1.45; }
+.restock-choice input { margin-top: 2px; }
 
 .desk-header {
   display: flex;

@@ -21,7 +21,12 @@ export function errorHandler(error: unknown, _req: Request, res: Response, _next
   }
   if (error instanceof MulterError) {
     const status = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
-    res.status(status).json({ success: false, error: { message: error.code === 'LIMIT_FILE_SIZE' ? 'Image size must be 5 MB or less' : 'Image upload was rejected' } });
+    const message = error.code === 'LIMIT_FILE_SIZE'
+      ? (error.field === 'image' ? 'Image size must be 5 MB or less' : 'Each evidence file must be 10 MB or less')
+      : error.code === 'LIMIT_FILE_COUNT'
+        ? 'Attach no more than 3 evidence files'
+        : 'File upload was rejected';
+    res.status(status).json({ success: false, error: { message } });
     return;
   }
   if (error instanceof Error && error.name === 'ZodError') {

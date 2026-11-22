@@ -7,6 +7,18 @@ import {
   Check, Lock, Unlock, Scale, RefreshCw, Search
 } from 'lucide-vue-next';
 import { api, apiErrorMessage } from '../services/api';
+import EvidenceUploader from '../components/EvidenceUploader.vue';
+import EscrowEvidenceGallery from '../components/EscrowEvidenceGallery.vue';
+
+type EscrowEvidence = {
+  id: string;
+  stage: 'CUSTOMER' | 'ADMIN' | 'SUPER_ADMIN';
+  originalName: string;
+  mimeType: string;
+  fileSize: number;
+  createdAt: string;
+  uploader: { name: string };
+};
 
 type EscrowDetails = {
   orderNumber: string;
@@ -19,7 +31,13 @@ type EscrowDetails = {
   bakongRef?: string;
   escrow: {
     id: string;
-    disputeReason?: string;
+    disputeReason?: string | null;
+    adminResponse?: string | null;
+    adminRespondedBy?: { name: string; email: string } | null;
+    resolutionNotes?: string | null;
+    arbitratedAt?: string | null;
+    arbitratedBy?: { name: string; email: string } | null;
+    evidence: EscrowEvidence[];
     amount: number | string;
     bakongMd5?: string;
     status: 'INITIATED' | 'FUNDS_LOCKED' | 'DISPATCHED' | 'RELEASED' | 'DISPUTED' | 'REFUNDED';
@@ -57,6 +75,7 @@ const searchInput = ref('');
 const actionLoading = ref(false);
 const showDisputeModal = ref(false);
 const disputeReason = ref('');
+const disputeEvidence = ref<File[]>([]);
 const showReleaseModal = ref(false);
 
 const isKhmer = computed(() => locale.value === 'km');
@@ -155,11 +174,18 @@ async function executeDispute() {
   error.value = '';
   successMessage.value = '';
   try {
-    const { data } = await api.post(`/escrow/${encodeURIComponent(escrowData.value.orderNumber)}/dispute`, {
-      reason: disputeReason.value.trim()
-    });
+    const form = new FormData();
+    form.append('reason', disputeReason.value.trim());
+    disputeEvidence.value.forEach((file) => form.append('evidence', file));
+    const { data } = await api.post(
+      `/escrow/${encodeURIComponent(escrowData.value.orderNumber)}/dispute`,
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
     successMessage.value = data.data.message || 'Dispute submitted successfully';
     showDisputeModal.value = false;
+    disputeReason.value = '';
+    disputeEvidence.value = [];
     await loadEscrow(escrowData.value.orderNumber);
   } catch (err) {
     error.value = apiErrorMessage(err) || 'Failed to submit dispute';
@@ -279,9 +305,13 @@ watch(currentOrderNumber, (newVal) => {
         <div v-else-if="escrowData.escrow?.status === 'DISPUTED'" class="dispute-notice-card">
           <Scale :size="20" />
           <div>
-            <strong>Dispute submitted for administrator review</strong>
-            <p>Reason: "{{ escrowData.escrow.disputeReason }}"</p>
-            <small>No decentralized or smart-contract arbitration is active in this demo.</small>
+            <strong>{{ isKhmer ? 'វិវាទកំពុងរង់ចាំការសម្រេចចុងក្រោយពី Super Admin' : 'Dispute awaiting final Super Admin decision' }}</strong>
+            <p>{{ isKhmer ? 'មូលហេតុរបស់អតិថិជន៖' : 'Customer report:' }} "{{ escrowData.escrow.disputeReason }}"</p>
+            <template v-if="escrowData.escrow.adminResponse">
+              <p>{{ isKhmer ? 'ការឆ្លើយតបពី Admin' : 'Store response' }}<span v-if="escrowData.escrow.adminRespondedBy"> ({{ escrowData.escrow.adminRespondedBy.name }})</span>: "{{ escrowData.escrow.adminResponse }}"</p>
+              <small>{{ isKhmer ? 'Super Admin នឹងពិនិត្យភស្តុតាងទាំងពីរ ហើយសម្រេចចុងក្រោយ។' : 'A Super Admin will review both statements and make the final decision.' }}</small>
+            </template>
+            <small v-else>{{ isKhmer ? 'កំពុងរង់ចាំការឆ្លើយតបពី Admin មុនពេល Super Admin ពិនិត្យ។' : 'Waiting for the admin response before Super Admin review.' }}</small>
           </div>
         </div>
 
@@ -289,10 +319,31 @@ watch(currentOrderNumber, (newVal) => {
         <div v-else-if="escrowData.escrow?.status === 'RELEASED'" class="released-notice-card">
           <Unlock :size="20" />
           <div>
-            <strong>Delivery confirmed; demo status released</strong>
-            <p>No smart-contract transaction or real payout was made.</p>
+            <strong>{{ escrowData.escrow.arbitratedAt
+              ? (isKhmer ? 'Super Admin បានសម្រេចបញ្ចេញការកត់ត្រាប្រាក់ទៅហាង' : 'Super Admin approved release to the store')
+              : (isKhmer ? 'បានបញ្ជាក់ការទទួលទំនិញ; បានកត់ត្រាស្ថានភាពក្នុងប្រព័ន្ធ' : 'Delivery confirmed; database status marked released') }}</strong>
+            <p v-if="escrowData.escrow.resolutionNotes">{{ escrowData.escrow.resolutionNotes }}</p>
+            <small v-if="escrowData.escrow.arbitratedBy">{{ isKhmer ? 'សម្រេចដោយ' : 'Decision by' }} {{ escrowData.escrow.arbitratedBy.name }}</small>
+            <small>{{ isKhmer ? 'នេះជាស្ថានភាពក្នុងប្រព័ន្ធប៉ុណ្ណោះ; មិនមានការផ្ទេរប្រាក់ពិតទេ។' : 'This is a recorded status only; no real payout was made.' }}</small>
           </div>
         </div>
+
+        <div v-else-if="escrowData.escrow?.status === 'REFUNDED'" class="released-notice-card refund-notice-card">
+          <Unlock :size="20" />
+          <div>
+            <strong>{{ isKhmer ? 'Super Admin បានសម្រេចអនុម័តការសងប្រាក់ជូនអតិថិជន' : 'Super Admin approved a customer refund' }}</strong>
+            <p>{{ escrowData.escrow.resolutionNotes }}</p>
+            <small v-if="escrowData.escrow.arbitratedBy">{{ isKhmer ? 'សម្រេចដោយ' : 'Decision by' }} {{ escrowData.escrow.arbitratedBy.name }}</small>
+            <small v-if="isDemoWallet">{{ isKhmer ? 'សមតុល្យកាបូបក្នុងប្រព័ន្ធត្រូវបានបញ្ចូលត្រឡប់វិញ។' : 'The store-wallet balance was credited back.' }}</small>
+            <small v-else>{{ isKhmer ? 'ស្ថានភាពសងប្រាក់ត្រូវបានកត់ត្រាប៉ុណ្ណោះ; ត្រូវដំណើរការសងប្រាក់តាមធនាគារដាច់ដោយឡែក។' : 'The refund decision is recorded only; a real bank refund must be processed separately.' }}</small>
+          </div>
+        </div>
+        <EscrowEvidenceGallery
+          v-if="escrowData.escrow?.evidence?.length"
+          :order-number="escrowData.orderNumber"
+          :evidence="escrowData.escrow.evidence"
+          :locale="locale"
+        />
       </section>
 
       <!-- Grid Layout for Details & Timeline -->
@@ -378,13 +429,14 @@ watch(currentOrderNumber, (newVal) => {
         </div>
           <p>{{ t('demoWallet.disputePrompt') }}</p>
         <label class="form-field">
-          <span>Dispute Reason / Evidence *</span>
-          <textarea v-model.trim="disputeReason" rows="3" placeholder="Goods not received, damaged during shipment, or item mismatch..."></textarea>
+          <span>{{ isKhmer ? 'មូលហេតុស្នើបោះបង់ / ប្រគល់ទំនិញវិញ *' : 'Cancellation / return reason *' }}</span>
+          <textarea v-model.trim="disputeReason" rows="3" :placeholder="isKhmer ? 'ពន្យល់អំពីទំនិញខូច ឬមូលហេតុផ្សេងទៀត...' : 'Explain damage or another reason for cancellation...'"></textarea>
         </label>
+        <EvidenceUploader v-model="disputeEvidence" :locale="locale" />
         <div class="modal-actions">
           <button class="button button-outline" type="button" @click="showDisputeModal = false">Cancel</button>
           <button class="button button-danger" type="button" :disabled="actionLoading || !disputeReason.trim()" @click="executeDispute">
-            {{ actionLoading ? 'Submitting...' : 'Register Dispute' }}
+            {{ actionLoading ? t('common.loading') : (isKhmer ? 'ផ្ញើសំណើទៅ Super Admin' : 'Send request to Super Admin') }}
           </button>
         </div>
       </div>

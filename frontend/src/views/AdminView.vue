@@ -7,6 +7,8 @@ import AdminOrdersTable from '../components/AdminOrdersTable.vue';
 import AdminSecurityCenter, { type AdminSecuritySection } from '../components/AdminSecurityCenter.vue';
 import AdminCommerceWorkspace, { type CommerceWorkspaceSection } from '../components/AdminCommerceWorkspace.vue';
 import AdminEscrowDesk from '../components/AdminEscrowDesk.vue';
+import AdminAccountsPanel from '../components/AdminAccountsPanel.vue';
+import { useAuthStore } from '../stores/auth';
 import { api, apiErrorMessage } from '../services/api';
 import type { Product } from '../data/products';
 
@@ -17,6 +19,7 @@ type AdminCustomer = { id: string; name: string; email: string; phone?: string; 
 type AdminWalletTransaction = { id: string; type: string; amount: number | string; balanceAfter: number | string; note?: string | null; createdAt: string; actor?: { name: string; email: string } | null; order?: { orderNumber: string } | null };
 
 const { t, locale } = useI18n();
+const auth = useAuthStore();
 const tab = ref('dashboard');
 const isLight = ref(false);
 const loading = ref(false);
@@ -263,7 +266,10 @@ const date = (value: string) => new Intl.DateTimeFormat(locale.value === 'km' ? 
 
       <template v-else-if="tab === 'security'"><AdminSecurityCenter :initial-section="securitySection" :light-mode="isLight" @toggle-light="isLight = !isLight" /></template>
 
-      <template v-else-if="tab === 'users-roles'"><AdminSecurityCenter initial-section="users" :light-mode="isLight" @toggle-light="isLight = !isLight" /></template>
+      <template v-else-if="tab === 'users-roles'">
+        <AdminAccountsPanel v-if="auth.user?.role === 'SUPER_ADMIN'" />
+        <AdminSecurityCenter v-else initial-section="users" :light-mode="isLight" @toggle-light="isLight = !isLight" />
+      </template>
 
       <template v-else-if="tab === 'audit'"><AdminSecurityCenter initial-section="audit" :light-mode="isLight" @toggle-light="isLight = !isLight" /></template>
 
@@ -286,7 +292,7 @@ const date = (value: string) => new Intl.DateTimeFormat(locale.value === 'km' ? 
       <template v-else-if="tab === 'orders'"><div class="admin-table-section"><AdminOrdersTable :orders="orders" :money="money" :date="date" :editable="true" @status="updateStatus" /></div></template>
 
       <template v-else-if="tab === 'customers'">
-        <div class="admin-table-section"><table class="orders-table customer-admin-table"><thead><tr><th>{{ t('admin.customer') }}</th><th>{{ t('checkout.email') }}</th><th>{{ t('checkout.phone') }}</th><th>{{ t('admin.orders') }}</th><th>Demo wallet balance</th><th></th></tr></thead><tbody><tr v-for="customer in customers" :key="customer.id"><td>{{ customer.name }}</td><td>{{ customer.email }}</td><td>{{ customer.phone || '—' }}</td><td>{{ customer._count.orders }}</td><td>{{ money(Number(customer.walletBalance)) }}</td><td><button class="button button-outline wallet-adjust-button" type="button" @click="openWallet(customer)">Adjust</button></td></tr></tbody></table><p v-if="!customers.length" class="muted-empty">{{ t('admin.empty') }}</p></div>
+        <div class="admin-table-section"><table class="orders-table customer-admin-table"><thead><tr><th>{{ t('admin.customer') }}</th><th>{{ t('checkout.email') }}</th><th>{{ t('checkout.phone') }}</th><th>{{ t('admin.orders') }}</th><th>Store wallet balance</th><th></th></tr></thead><tbody><tr v-for="customer in customers" :key="customer.id"><td>{{ customer.name }}</td><td>{{ customer.email }}</td><td>{{ customer.phone || '—' }}</td><td>{{ customer._count.orders }}</td><td>{{ money(Number(customer.walletBalance)) }}</td><td><button class="button button-outline wallet-adjust-button" type="button" @click="openWallet(customer)">Adjust</button></td></tr></tbody></table><p v-if="!customers.length" class="muted-empty">{{ t('admin.empty') }}</p></div>
       </template>
 
       <template v-else-if="tab === 'categories'">
@@ -331,11 +337,11 @@ const date = (value: string) => new Intl.DateTimeFormat(locale.value === 'km' ? 
     <div v-if="walletCustomer" class="modal-backdrop" @click.self="walletCustomer = null">
       <section class="product-modal wallet-modal">
         <div class="modal-heading">
-          <div><span class="section-kicker">DEMO WALLET</span><h2>{{ walletCustomer.name }}</h2><p>{{ walletCustomer.email }}</p></div>
+          <div><span class="section-kicker">STORE WALLET</span><h2>{{ walletCustomer.name }}</h2><p>{{ walletCustomer.email }}</p></div>
           <button type="button" class="icon-link" aria-label="Close" @click="walletCustomer = null"><X :size="19" /></button>
         </div>
-        <div class="wallet-current-balance"><span>Available demo balance</span><strong>{{ money(Number(walletCustomer.walletBalance)) }}</strong></div>
-        <p class="wallet-demo-notice">Demo ledger only. This adjustment does not deposit, withdraw, or transfer real money.</p>
+        <div class="wallet-current-balance"><span>Available store balance</span><strong>{{ money(Number(walletCustomer.walletBalance)) }}</strong></div>
+        <p class="wallet-demo-notice">Manual ledger adjustment only. Record a credit or debit only when supported by a verified payment, refund, or correction; this does not initiate a bank transfer.</p>
         <form class="wallet-adjust-form" @submit.prevent="saveWalletAdjustment">
           <label class="form-field"><span>Adjustment</span><select v-model="walletForm.direction"><option value="CREDIT">Credit balance</option><option value="DEBIT">Debit balance</option></select></label>
           <label class="form-field"><span>Amount (USD)</span><input v-model.number="walletForm.amount" type="number" min="0.01" max="1000000" step="0.01" required /></label>

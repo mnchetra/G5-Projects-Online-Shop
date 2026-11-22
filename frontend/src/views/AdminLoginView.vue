@@ -16,7 +16,7 @@ const error = ref('');
 
 onMounted(async () => {
   if (!auth.checked) await auth.fetchMe();
-  if (auth.user?.role === 'ADMIN') await router.replace('/admin');
+  if (auth.user?.role === 'ADMIN' || auth.user?.role === 'SUPER_ADMIN') await router.replace('/admin');
 });
 
 async function submit() {
@@ -24,7 +24,7 @@ async function submit() {
   error.value = '';
   try {
     await auth.login(email.value.trim(), password.value);
-    if (auth.user?.role !== 'ADMIN') {
+    if (auth.user?.role !== 'ADMIN' && auth.user?.role !== 'SUPER_ADMIN') {
       await auth.logout();
       error.value = 'This account does not have administrator access.';
       return;
